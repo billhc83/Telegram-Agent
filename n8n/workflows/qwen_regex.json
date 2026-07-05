@@ -1,0 +1,71 @@
+{
+  "name": "qwen_regex",
+  "nodes": [
+    {
+      "parameters": {
+        "workflowInputs": {
+          "values": [
+            { "name": "description", "type": "string" },
+            { "name": "examples", "type": "string" }
+          ]
+        }
+      },
+      "id": "00000007-0001-4000-0000-000000000007",
+      "name": "Execute Workflow Trigger",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const sys = 'Write a regex for the described pattern. Return JSON only: {\"regex\": \"...\", \"explanation\": \"one line\", \"matches\": [\"ex1\",\"ex2\",\"ex3\"]}. No markdown wrapper.'; const t = $input.first().json; const userMsg = t.description + (t.examples ? '\\n\\nExamples to match/not match:\\n' + t.examples : ''); return [{ json: { model: 'qwen2.5-coder:14b', messages: [{ role: 'system', content: sys }, { role: 'user', content: userMsg }], stream: false, options: { temperature: 0.1 } } }];"
+      },
+      "id": "00000007-0002-4000-0000-000000000007",
+      "name": "Build Body",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:11434/api/chat",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json }}",
+        "options": {}
+      },
+      "id": "00000007-0003-4000-0000-000000000007",
+      "name": "Ollama Chat",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: { output: $input.first().json.message.content } }];"
+      },
+      "id": "00000007-0004-4000-0000-000000000007",
+      "name": "Extract Output",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [900, 300]
+    }
+  ],
+  "connections": {
+    "Execute Workflow Trigger": {
+      "main": [[{ "node": "Build Body", "type": "main", "index": 0 }]]
+    },
+    "Build Body": {
+      "main": [[{ "node": "Ollama Chat", "type": "main", "index": 0 }]]
+    },
+    "Ollama Chat": {
+      "main": [[{ "node": "Extract Output", "type": "main", "index": 0 }]]
+    }
+  },
+  "active": false,
+  "settings": { "executionOrder": "v1" },
+  "meta": { "templateCredsSetupCompleted": true, "instanceId": "REPLACE_WITH_YOUR_INSTANCE_ID" },
+  "tags": [{ "name": "qwen" }, { "name": "local-model" }],
+  "id": "00000007-0000-4000-0000-000000000007"
+}

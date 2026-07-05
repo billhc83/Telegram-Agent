@@ -1,0 +1,53 @@
+{
+  "name": "project_scrape_cron",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            { "field": "hours", "hoursInterval": 1, "triggerAtHour": 8 },
+            { "field": "hours", "hoursInterval": 1, "triggerAtHour": 18 }
+          ]
+        }
+      },
+      "id": "aa000001-0000-4000-0000-000000000001",
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const fs = require('fs');\nconst base = '/projects';\nlet projects = [];\ntry {\n  projects = fs.readdirSync(base)\n    .filter(f => !f.startsWith('.') && fs.statSync(base + '/' + f).isDirectory());\n} catch(e) {\n  return [{ json: { error: e.message, projects: [] } }];\n}\nreturn [{ json: { projects, count: projects.length } }];"
+      },
+      "id": "aa000002-0000-4000-0000-000000000002",
+      "name": "Scan Projects Dir",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const fs = require('fs');\nconst projects = $input.first().json.projects || [];\nconst store = {\n  projects,\n  updated: new Date().toISOString()\n};\nfs.writeFileSync('/memory/projects.json', JSON.stringify(store, null, 2));\nreturn [{ json: { written: true, count: projects.length, projects } }];"
+      },
+      "id": "aa000003-0000-4000-0000-000000000003",
+      "name": "Write projects.json",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [680, 300]
+    }
+  ],
+  "connections": {
+    "Schedule Trigger": {
+      "main": [[{ "node": "Scan Projects Dir", "type": "main", "index": 0 }]]
+    },
+    "Scan Projects Dir": {
+      "main": [[{ "node": "Write projects.json", "type": "main", "index": 0 }]]
+    }
+  },
+  "active": true,
+  "settings": { "executionOrder": "v1" },
+  "meta": { "templateCredsSetupCompleted": true, "instanceId": "REPLACE_WITH_YOUR_INSTANCE_ID" },
+  "tags": [{ "name": "cron" }, { "name": "projects" }],
+  "id": "00000013-0000-4000-0000-000000000013"
+}

@@ -1,0 +1,24 @@
+FROM node:22-alpine
+
+# System tools available to the bash MCP tool
+RUN apk add --no-cache \
+  bash \
+  git \
+  python3 \
+  py3-pip \
+  curl \
+  wget \
+  jq \
+  ripgrep \
+  docker-cli \
+  openssh-client \
+  ca-certificates
+
+# Python package manager (fast venv/project management)
+RUN pip3 install --no-cache-dir uv --break-system-packages
+
+# Claude Code CLI (antigravity)
+# Installed globally so `claude` is on PATH for all tool calls.
+RUN npm install -g @anthropic-ai/claude-code
+
+WORKDIR /workspace

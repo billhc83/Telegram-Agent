@@ -1,0 +1,2862 @@
+{
+  "updatedAt": "2026-06-15T01:54:07.751Z",
+  "createdAt": "2026-06-13T02:16:32.021Z",
+  "id": "13329864-5514-4f83-acf9-a4610cd1e903",
+  "name": "Telegram AI Assistant",
+  "description": null,
+  "active": true,
+  "isArchived": false,
+  "nodes": [
+    {
+      "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+      "name": "Telegram Trigger",
+      "type": "n8n-nodes-base.telegramTrigger",
+      "position": [
+        240,
+        1248
+      ],
+      "webhookId": "telegram-main-webhook",
+      "parameters": {
+        "updates": [
+          "message",
+          "callback_query"
+        ],
+        "additionalFields": {}
+      },
+      "credentials": {
+        "telegramApi": {
+          "id": "Z8q2xwxyJY7RguGl",
+          "name": "Telegram account"
+        }
+      },
+      "typeVersion": 1.1
+    },
+    {
+      "id": "b2c3d4e5-f6a7-8901-bcde-f12345678901",
+      "name": "Extract Message",
+      "type": "n8n-nodes-base.set",
+      "position": [
+        464,
+        1248
+      ],
+      "parameters": {
+        "options": {},
+        "assignments": {
+          "assignments": [
+            {
+              "id": "asgn-chat-id",
+              "name": "chat_id",
+              "type": "string",
+              "value": "={{ $json.message.chat.id }}"
+            },
+            {
+              "id": "asgn-text",
+              "name": "message_text",
+              "type": "string",
+              "value": "={{ $json.message.text ?? '' }}"
+            },
+            {
+              "id": "asgn-user",
+              "name": "username",
+              "type": "string",
+              "value": "={{ $json.message.from.username ?? $json.message.from.first_name }}"
+            },
+            {
+              "id": "asgn-ts",
+              "name": "timestamp",
+              "type": "string",
+              "value": "={{ $now.toISO() }}"
+            }
+          ]
+        }
+      },
+      "typeVersion": 3.4
+    },
+    {
+      "id": "c3d4e5f6-a7b8-9012-cdef-123456789012",
+      "name": "Route by Intent",
+      "type": "n8n-nodes-base.switch",
+      "position": [
+        688,
+        1200
+      ],
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "outputKey": "email",
+              "conditions": {
+                "options": {
+                  "version": 2,
+                  "leftValue": "",
+                  "caseSensitive": false,
+                  "typeValidation": "strict"
+                },
+                "combinator": "or",
+                "conditions": [
+                  {
+                    "id": "cond-email",
+                    "operator": {
+                      "type": "string",
+                      "operation": "regex"
+                    },
+                    "leftValue": "={{ $json.message_text }}",
+                    "rightValue": "email|gmail|inbox|send mail|reply to|unread|attachment"
+                  }
+                ]
+              },
+              "renameOutput": true
+            },
+            {
+              "outputKey": "research",
+              "conditions": {
+                "options": {
+                  "version": 2,
+                  "leftValue": "",
+                  "caseSensitive": false,
+                  "typeValidation": "strict"
+                },
+                "combinator": "or",
+                "conditions": [
+                  {
+                    "id": "cond-research",
+                    "operator": {
+                      "type": "string",
+                      "operation": "regex"
+                    },
+                    "leftValue": "={{ $json.message_text }}",
+                    "rightValue": "research|search|find|browse|look up|web|what is|who is|explain|article"
+                  }
+                ]
+              },
+              "renameOutput": true
+            },
+            {
+              "outputKey": "coding",
+              "conditions": {
+                "options": {
+                  "version": 2,
+                  "leftValue": "",
+                  "caseSensitive": false,
+                  "typeValidation": "strict"
+                },
+                "combinator": "or",
+                "conditions": [
+                  {
+                    "id": "cond-code",
+                    "operator": {
+                      "type": "string",
+                      "operation": "regex"
+                    },
+                    "leftValue": "={{ $json.message_text }}",
+                    "rightValue": "code|script|function|debug|fix|implement|program|python|javascript|typescript|bash|error|traceback|file|files|folder|directory|workspace|read file|write file|ls"
+                  }
+                ]
+              },
+              "renameOutput": true
+            },
+            {
+              "outputKey": "drafting",
+              "conditions": {
+                "options": {
+                  "version": 2,
+                  "leftValue": "",
+                  "caseSensitive": false,
+                  "typeValidation": "strict"
+                },
+                "combinator": "or",
+                "conditions": [
+                  {
+                    "id": "cond-draft",
+                    "operator": {
+                      "type": "string",
+                      "operation": "regex"
+                    },
+                    "leftValue": "={{ $json.message_text }}",
+                    "rightValue": "write|draft|compose|summarize|summarise|essay|paragraph|message|letter|post"
+                  }
+                ]
+              },
+              "renameOutput": true
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra"
+        }
+      },
+      "typeVersion": 3.2
+    },
+    {
+      "id": "d4e5f6a7-b8c9-0123-defa-234567890123",
+      "name": "Email Agent",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "position": [
+        1328,
+        -176
+      ],
+      "parameters": {
+        "text": "={{ $json.message_text }}",
+        "options": {
+          "systemMessage": "You are an email assistant. Help the user read, reply, compose, and organize their Gmail. Be concise \u2014 responses go to Telegram. Use the Gmail MCP tool for all email operations.\n\nGuidelines:\n- To fetch the LATEST email: call search_emails with query=\"in:inbox\" and maxResults=1. Gmail returns results newest-first, so the first result is always the most recent.\n- To show a summary of recent emails: use maxResults=5 with query=\"in:inbox\".\n- Always show: sender, subject, date, and a brief summary of the body.\n- When replying or composing, confirm recipient and subject before sending.\n- Use the memory tool to recall relevant context from past conversations."
+        },
+        "promptType": "define"
+      },
+      "typeVersion": 1.7
+    },
+    {
+      "id": "e5f6a7b8-c9d0-1234-efab-345678901234",
+      "name": "Ollama \u2014 Email",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOllama",
+      "position": [
+        1392,
+        48
+      ],
+      "parameters": {
+        "model": "qwen3-14b-nothink:latest",
+        "options": {}
+      },
+      "credentials": {
+        "ollamaApi": {
+          "id": "Qs8Dh8bkuU19W10U",
+          "name": "Ollama account"
+        }
+      },
+      "typeVersion": 1
+    },
+    {
+      "id": "f6a7b8c9-d0e1-2345-fabc-456789012345",
+      "name": "Gmail MCP",
+      "type": "@n8n/n8n-nodes-langchain.mcpClientTool",
+      "position": [
+        1520,
+        48
+      ],
+      "parameters": {
+        "options": {},
+        "sseEndpoint": "http://mcp-gmail:3003/sse"
+      },
+      "typeVersion": 1
+    },
+    {
+      "id": "a7b8c9d0-e1f2-3456-abcd-567890123456",
+      "name": "Memory \u2014 Email",
+      "type": "@n8n/n8n-nodes-langchain.vectorStoreQdrant",
+      "position": [
+        1104,
+        48
+      ],
+      "parameters": {
+        "mode": "retrieve-as-tool",
+        "options": {},
+        "toolName": "search_memory",
+        "toolDescription": "Search past conversation history for relevant context. Use it before answering to recall what was said before.",
+        "qdrantCollection": {
+          "__rl": true,
+          "mode": "id",
+          "value": "agent_memory"
+        }
+      },
+      "credentials": {
+        "qdrantApi": {
+          "id": "aWAok1h2HHdNtmht",
+          "name": "Qdrant account"
+        }
+      },
+      "typeVersion": 1.1
+    },
+    {
+      "id": "b8c9d0e1-f2a3-4567-bcde-678901234567",
+      "name": "Research Agent",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "position": [
+        1328,
+        432
+      ],
+      "parameters": {
+        "text": "={{ $json.message_text }}",
+        "options": {
+          "systemMessage": "You are a research assistant. You find accurate information by browsing the web using the Playwright tool. Summarize findings clearly and concisely for Telegram. Cite sources. Use the memory tool to recall context from prior conversations."
+        },
+        "promptType": "define"
+      },
+      "typeVersion": 1.7
+    },
+    {
+      "id": "c9d0e1f2-a3b4-5678-cdef-789012345678",
+      "name": "OpenRouter \u2014 Research",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "position": [
+        1392,
+        656
+      ],
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "mode": "list",
+          "value": "anthropic/claude-sonnet-4.5"
+        },
+        "options": {
+          "temperature": 0.5
+        }
+      },
+      "credentials": {
+        "openAiApi": {
+          "id": "RQcJfPgXjwR396QJ",
+          "name": "OpenAI account"
+        }
+      },
+      "typeVersion": 1.2
+    },
+    {
+      "id": "d0e1f2a3-b4c5-6789-def0-890123456789",
+      "name": "Playwright MCP",
+      "type": "@n8n/n8n-nodes-langchain.mcpClientTool",
+      "position": [
+        1520,
+        656
+      ],
+      "parameters": {
+        "options": {},
+        "sseEndpoint": "http://mcp-playwright:3002/sse"
+      },
+      "typeVersion": 1
+    },
+    {
+      "id": "e1f2a3b4-c5d6-789a-ef01-901234567890",
+      "name": "Memory \u2014 Research",
+      "type": "@n8n/n8n-nodes-langchain.vectorStoreQdrant",
+      "position": [
+        1104,
+        656
+      ],
+      "parameters": {
+        "mode": "retrieve-as-tool",
+        "options": {},
+        "toolName": "search_memory",
+        "toolDescription": "Search past conversation history for relevant context.",
+        "qdrantCollection": {
+          "__rl": true,
+          "mode": "id",
+          "value": "agent_memory"
+        }
+      },
+      "credentials": {
+        "qdrantApi": {
+          "id": "aWAok1h2HHdNtmht",
+          "name": "Qdrant account"
+        }
+      },
+      "typeVersion": 1.1
+    },
+    {
+      "id": "f2a3b4c5-d6e7-89ab-f012-012345678901",
+      "name": "Coding Agent",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "position": [
+        1328,
+        1040
+      ],
+      "parameters": {
+        "text": "={{ $json.message_text }}",
+        "options": {
+          "systemMessage": "You are a coding assistant. Help the user write, debug, and understand code. You can read and write files using the filesystem tool. Format code with HTML tags for Telegram: use <code>inline</code> and <pre>block</pre>. Use the memory tool to recall prior code context."
+        },
+        "promptType": "define"
+      },
+      "typeVersion": 1.7
+    },
+    {
+      "id": "a3b4c5d6-e7f8-9abc-0123-123456789012",
+      "name": "OpenRouter \u2014 Coding",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "position": [
+        1200,
+        1264
+      ],
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "mode": "list",
+          "value": "anthropic/claude-sonnet-4.5"
+        },
+        "options": {
+          "temperature": 0.2
+        }
+      },
+      "credentials": {
+        "openAiApi": {
+          "id": "RQcJfPgXjwR396QJ",
+          "name": "OpenAI account"
+        }
+      },
+      "typeVersion": 1.2
+    },
+    {
+      "id": "b4c5d6e7-f8a9-abcd-1234-234567890123",
+      "name": "Filesystem MCP \u2014 Coding",
+      "type": "@n8n/n8n-nodes-langchain.mcpClientTool",
+      "position": [
+        1328,
+        1264
+      ],
+      "parameters": {
+        "options": {},
+        "sseEndpoint": "http://mcp-filesystem:3001/sse"
+      },
+      "typeVersion": 1
+    },
+    {
+      "id": "c5d6e7f8-a9b0-bcde-2345-345678901234",
+      "name": "Memory \u2014 Coding",
+      "type": "@n8n/n8n-nodes-langchain.vectorStoreQdrant",
+      "position": [
+        912,
+        1264
+      ],
+      "parameters": {
+        "mode": "retrieve-as-tool",
+        "options": {},
+        "toolName": "search_memory",
+        "toolDescription": "Search past conversation history for relevant context.",
+        "qdrantCollection": {
+          "__rl": true,
+          "mode": "id",
+          "value": "agent_memory"
+        }
+      },
+      "credentials": {
+        "qdrantApi": {
+          "id": "aWAok1h2HHdNtmht",
+          "name": "Qdrant account"
+        }
+      },
+      "typeVersion": 1.1
+    },
+    {
+      "id": "d6e7f8a9-b0c1-cdef-3456-456789012345",
+      "name": "Drafting Agent",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "position": [
+        1328,
+        1648
+      ],
+      "parameters": {
+        "text": "={{ $json.message_text }}",
+        "options": {
+          "systemMessage": "You are a writing assistant. Help the user draft, edit, compose, or summarize text. Keep your responses concise and well-formatted for Telegram. You can access files via the filesystem tool if the user references a document."
+        },
+        "promptType": "define"
+      },
+      "typeVersion": 1.7
+    },
+    {
+      "id": "e7f8a9b0-c1d2-def0-4567-567890123456",
+      "name": "OpenRouter \u2014 Drafting",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "position": [
+        1392,
+        1872
+      ],
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "mode": "list",
+          "value": "google/gemini-2.5-flash"
+        },
+        "options": {
+          "temperature": 0.7
+        }
+      },
+      "credentials": {
+        "openAiApi": {
+          "id": "RQcJfPgXjwR396QJ",
+          "name": "OpenAI account"
+        }
+      },
+      "typeVersion": 1.2
+    },
+    {
+      "id": "f8a9b0c1-d2e3-ef01-5678-678901234567",
+      "name": "Filesystem MCP \u2014 Drafting",
+      "type": "@n8n/n8n-nodes-langchain.mcpClientTool",
+      "position": [
+        1520,
+        1872
+      ],
+      "parameters": {
+        "options": {},
+        "sseEndpoint": "http://mcp-filesystem:3001/sse"
+      },
+      "typeVersion": 1
+    },
+    {
+      "id": "a9b0c1d2-e3f4-f012-6789-789012345678",
+      "name": "Memory \u2014 Drafting",
+      "type": "@n8n/n8n-nodes-langchain.vectorStoreQdrant",
+      "position": [
+        1104,
+        1872
+      ],
+      "parameters": {
+        "mode": "retrieve-as-tool",
+        "options": {},
+        "toolName": "search_memory",
+        "toolDescription": "Search past conversation history for relevant context.",
+        "qdrantCollection": {
+          "__rl": true,
+          "mode": "id",
+          "value": "agent_memory"
+        }
+      },
+      "credentials": {
+        "qdrantApi": {
+          "id": "aWAok1h2HHdNtmht",
+          "name": "Qdrant account"
+        }
+      },
+      "typeVersion": 1.1
+    },
+    {
+      "id": "b0c1d2e3-f4a5-0123-789a-890123456789",
+      "name": "General Agent",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "position": [
+        1200,
+        2464
+      ],
+      "parameters": {
+        "text": "={{ $json.message_text }}",
+        "options": {
+          "systemMessage": "You are a general-purpose AI assistant available via Telegram. Be helpful, concise, and conversational. Use the memory tool to recall relevant context from past conversations."
+        },
+        "promptType": "define"
+      },
+      "typeVersion": 1.7
+    },
+    {
+      "id": "c1d2e3f4-a5b6-1234-89ab-901234567890",
+      "name": "OpenRouter \u2014 General",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "position": [
+        1168,
+        2688
+      ],
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "mode": "list",
+          "value": "google/gemini-2.5-flash"
+        },
+        "options": {
+          "temperature": 0.6
+        }
+      },
+      "credentials": {
+        "openAiApi": {
+          "id": "RQcJfPgXjwR396QJ",
+          "name": "OpenAI account"
+        }
+      },
+      "typeVersion": 1.2
+    },
+    {
+      "id": "d2e3f4a5-b6c7-2345-9abc-012345678901",
+      "name": "Memory \u2014 General",
+      "type": "@n8n/n8n-nodes-langchain.vectorStoreQdrant",
+      "position": [
+        1296,
+        2688
+      ],
+      "parameters": {
+        "mode": "retrieve-as-tool",
+        "options": {},
+        "toolName": "search_memory",
+        "toolDescription": "Search past conversation history for relevant context.",
+        "qdrantCollection": {
+          "__rl": true,
+          "mode": "id",
+          "value": "agent_memory"
+        }
+      },
+      "credentials": {
+        "qdrantApi": {
+          "id": "aWAok1h2HHdNtmht",
+          "name": "Qdrant account"
+        }
+      },
+      "typeVersion": 1.1
+    },
+    {
+      "id": "e3f4a5b6-c7d8-3456-abcd-123456789012",
+      "name": "Merge Responses",
+      "type": "n8n-nodes-base.merge",
+      "position": [
+        1920,
+        1200
+      ],
+      "parameters": {
+        "numberInputs": 5
+      },
+      "typeVersion": 3
+    },
+    {
+      "id": "f4a5b6c7-d8e9-4567-bcde-234567890123",
+      "name": "Store Conversation",
+      "type": "@n8n/n8n-nodes-langchain.vectorStoreQdrant",
+      "position": [
+        2176,
+        848
+      ],
+      "parameters": {
+        "mode": "insert",
+        "options": {},
+        "qdrantCollection": {
+          "__rl": true,
+          "mode": "id",
+          "value": "agent_memory"
+        }
+      },
+      "credentials": {
+        "qdrantApi": {
+          "id": "aWAok1h2HHdNtmht",
+          "name": "Qdrant account"
+        }
+      },
+      "typeVersion": 1.1
+    },
+    {
+      "id": "a5b6c7d8-e9f0-5678-cdef-345678901234",
+      "name": "Embeddings \u2014 Store",
+      "type": "@n8n/n8n-nodes-langchain.embeddingsOllama",
+      "position": [
+        2144,
+        1072
+      ],
+      "parameters": {
+        "model": "nomic-embed-text:latest"
+      },
+      "credentials": {
+        "ollamaApi": {
+          "id": "Qs8Dh8bkuU19W10U",
+          "name": "Ollama account"
+        }
+      },
+      "typeVersion": 1
+    },
+    {
+      "id": "b6c7d8e9-f0a1-6789-def0-456789012345",
+      "name": "Send Reply",
+      "type": "n8n-nodes-base.telegram",
+      "position": [
+        2288,
+        1456
+      ],
+      "webhookId": "4a0d56c2-bb1a-4554-97b4-3bea6355b7bd",
+      "parameters": {
+        "text": "={{ $('Merge Responses').item.json.output }}",
+        "chatId": "={{ $('Extract Message').item.json.chat_id }}",
+        "additionalFields": {
+          "parse_mode": "HTML"
+        }
+      },
+      "credentials": {
+        "telegramApi": {
+          "id": "Z8q2xwxyJY7RguGl",
+          "name": "Telegram account"
+        }
+      },
+      "typeVersion": 1.2
+    },
+    {
+      "id": "c7d8e9f0-a1b2-789a-ef01-567890123456",
+      "name": "Embeddings \u2014 Email",
+      "type": "@n8n/n8n-nodes-langchain.embeddingsOllama",
+      "position": [
+        1184,
+        256
+      ],
+      "parameters": {
+        "model": "nomic-embed-text:latest"
+      },
+      "credentials": {
+        "ollamaApi": {
+          "id": "Qs8Dh8bkuU19W10U",
+          "name": "Ollama account"
+        }
+      },
+      "typeVersion": 1
+    },
+    {
+      "id": "d8e9f0a1-b2c3-89ab-f012-678901234567",
+      "name": "Embeddings \u2014 Research",
+      "type": "@n8n/n8n-nodes-langchain.embeddingsOllama",
+      "position": [
+        1184,
+        864
+      ],
+      "parameters": {
+        "model": "nomic-embed-text:latest"
+      },
+      "credentials": {
+        "ollamaApi": {
+          "id": "Qs8Dh8bkuU19W10U",
+          "name": "Ollama account"
+        }
+      },
+      "typeVersion": 1
+    },
+    {
+      "id": "e9f0a1b2-c3d4-9abc-0123-789012345678",
+      "name": "Embeddings \u2014 Coding",
+      "type": "@n8n/n8n-nodes-langchain.embeddingsOllama",
+      "position": [
+        992,
+        1472
+      ],
+      "parameters": {
+        "model": "nomic-embed-text:latest"
+      },
+      "credentials": {
+        "ollamaApi": {
+          "id": "Qs8Dh8bkuU19W10U",
+          "name": "Ollama account"
+        }
+      },
+      "typeVersion": 1
+    },
+    {
+      "id": "f0a1b2c3-d4e5-abcd-1234-890123456789",
+      "name": "Embeddings \u2014 Drafting",
+      "type": "@n8n/n8n-nodes-langchain.embeddingsOllama",
+      "position": [
+        1184,
+        2080
+      ],
+      "parameters": {
+        "model": "nomic-embed-text:latest"
+      },
+      "credentials": {
+        "ollamaApi": {
+          "id": "Qs8Dh8bkuU19W10U",
+          "name": "Ollama account"
+        }
+      },
+      "typeVersion": 1
+    },
+    {
+      "id": "a1b2c3d4-e5f6-bcde-2345-901234567890",
+      "name": "Embeddings \u2014 General",
+      "type": "@n8n/n8n-nodes-langchain.embeddingsOllama",
+      "position": [
+        1376,
+        2896
+      ],
+      "parameters": {
+        "model": "nomic-embed-text:latest"
+      },
+      "credentials": {
+        "ollamaApi": {
+          "id": "Qs8Dh8bkuU19W10U",
+          "name": "Ollama account"
+        }
+      },
+      "typeVersion": 1
+    },
+    {
+      "id": "d5bf63fd-633d-49b8-897c-a22327e4bc42",
+      "name": "Document Loader \u2014 Store",
+      "type": "@n8n/n8n-nodes-langchain.documentDefaultDataLoader",
+      "position": [
+        2272,
+        1072
+      ],
+      "parameters": {
+        "options": {},
+        "jsonData": "={{ JSON.stringify({ text: $('Extract Message').item.json.message_text + '\\n\\nAssistant: ' + $json.output, source: 'telegram', username: $('Extract Message').item.json.username, timestamp: $('Extract Message').item.json.timestamp }) }}",
+        "jsonMode": "expressionData"
+      },
+      "typeVersion": 1
+    },
+    {
+      "id": "10bf1944-b8d4-4f88-8650-0231a8f747ca",
+      "name": "Text Splitter \u2014 Store",
+      "type": "@n8n/n8n-nodes-langchain.textSplitterRecursiveCharacterTextSplitter",
+      "position": [
+        2352,
+        1280
+      ],
+      "parameters": {
+        "options": {},
+        "chunkOverlap": 100
+      },
+      "typeVersion": 1
+    },
+    {
+      "id": "tool0001-0001-4000-0000-000000000001",
+      "name": "Tool \u2014 Explain Error",
+      "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
+      "position": [
+        1456,
+        1264
+      ],
+      "parameters": {
+        "name": "explain_error",
+        "fields": {
+          "values": [
+            {
+              "name": "input",
+              "stringValue": "={{ $fromAI('input', 'The error message or stack trace to analyze') }}"
+            }
+          ]
+        },
+        "workflowId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "00000001-0000-4000-0000-000000000001"
+        },
+        "description": "Explain an error message or stack trace. Returns: what went wrong in plain English, most likely root cause, first thing to check."
+      },
+      "typeVersion": 1.2
+    },
+    {
+      "id": "tool0001-0002-4000-0000-000000000002",
+      "name": "Tool \u2014 Commit Message",
+      "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
+      "position": [
+        1584,
+        1264
+      ],
+      "parameters": {
+        "name": "commit_message",
+        "fields": {
+          "values": [
+            {
+              "name": "input",
+              "stringValue": "={{ $fromAI('input', 'The git diff output to write a commit message for') }}"
+            }
+          ]
+        },
+        "workflowId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "00000002-0000-4000-0000-000000000002"
+        },
+        "description": "Generate a git commit message in Conventional Commits format from a diff. Input should be the output of git diff."
+      },
+      "typeVersion": 1.2
+    },
+    {
+      "id": "tool0001-0003-4000-0000-000000000003",
+      "name": "Tool \u2014 Summarize Logs",
+      "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
+      "position": [
+        1712,
+        1264
+      ],
+      "parameters": {
+        "name": "summarize_logs",
+        "fields": {
+          "values": [
+            {
+              "name": "input",
+              "stringValue": "={{ $fromAI('input', 'The raw log output to summarize') }}"
+            }
+          ]
+        },
+        "workflowId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "00000003-0000-4000-0000-000000000003"
+        },
+        "description": "Summarize raw log output (docker logs, nginx, app logs) as bullet points. Highlights errors, warnings, and key events."
+      },
+      "typeVersion": 1.2
+    },
+    {
+      "id": "tool0001-0004-4000-0000-000000000004",
+      "name": "Tool \u2014 Summarize Code",
+      "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
+      "position": [
+        1840,
+        1264
+      ],
+      "parameters": {
+        "name": "summarize_code",
+        "fields": {
+          "values": [
+            {
+              "name": "input",
+              "stringValue": "={{ $fromAI('input', 'The code snippet or file content to summarize') }}"
+            }
+          ]
+        },
+        "workflowId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "00000004-0000-4000-0000-000000000004"
+        },
+        "description": "Summarize what a code snippet or file does in 2-3 sentences. States what it exports or provides, key dependencies, core logic."
+      },
+      "typeVersion": 1.2
+    },
+    {
+      "id": "tool0001-0005-4000-0000-000000000005",
+      "name": "Tool \u2014 Bash Command",
+      "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
+      "position": [
+        1968,
+        1264
+      ],
+      "parameters": {
+        "name": "bash_command",
+        "fields": {
+          "values": [
+            {
+              "name": "input",
+              "stringValue": "={{ $fromAI('input', 'Description of the task to generate a bash command for') }}"
+            }
+          ]
+        },
+        "workflowId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "00000005-0000-4000-0000-000000000005"
+        },
+        "description": "Generate a single bash command or short pipeline to accomplish a described task. Returns only the command with no explanation."
+      },
+      "typeVersion": 1.2
+    },
+    {
+      "id": "tool0001-0006-4000-0000-000000000006",
+      "name": "Tool \u2014 Changelog",
+      "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
+      "position": [
+        2096,
+        1264
+      ],
+      "parameters": {
+        "name": "changelog",
+        "fields": {
+          "values": [
+            {
+              "name": "input",
+              "stringValue": "={{ $fromAI('input', 'The git log output to convert to a changelog') }}"
+            }
+          ]
+        },
+        "workflowId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "00000006-0000-4000-0000-000000000006"
+        },
+        "description": "Convert a git log into a formatted changelog section grouped by Added, Changed, Fixed, Removed. Input should be the output of git log."
+      },
+      "typeVersion": 1.2
+    },
+    {
+      "id": "28d7b5b4-0b95-459a-bf5f-a340bba958d7",
+      "name": "Shell MCP",
+      "type": "@n8n/n8n-nodes-langchain.mcpClientTool",
+      "position": [
+        2224,
+        1264
+      ],
+      "parameters": {
+        "options": {},
+        "sseEndpoint": "http://mcp-shell:3005/sse"
+      },
+      "typeVersion": 1
+    },
+    {
+      "id": "a84dfb87-c120-4b77-a8c4-a008df7c678c",
+      "name": "GitHub MCP",
+      "type": "@n8n/n8n-nodes-langchain.mcpClientTool",
+      "position": [
+        2352,
+        1264
+      ],
+      "parameters": {
+        "options": {},
+        "sseEndpoint": "http://mcp-github:3006/sse"
+      },
+      "typeVersion": 1
+    },
+    {
+      "id": "tool0001-0007-4000-0000-000000000007",
+      "name": "Tool \u2014 Regex",
+      "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
+      "position": [
+        2224,
+        1392
+      ],
+      "parameters": {
+        "name": "regex",
+        "fields": {
+          "values": [
+            {
+              "name": "description",
+              "stringValue": "={{ $fromAI('description', 'Description of the pattern to match') }}"
+            },
+            {
+              "name": "examples",
+              "stringValue": "={{ $fromAI('examples', 'Example strings that should or should not match (optional)') }}"
+            }
+          ]
+        },
+        "workflowId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "00000007-0000-4000-0000-000000000007"
+        },
+        "description": "Write a regex for a described pattern. Returns JSON with regex and one-line explanation."
+      },
+      "typeVersion": 1.2
+    },
+    {
+      "id": "tool0001-0008-4000-0000-000000000008",
+      "name": "Tool \u2014 PR Description",
+      "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
+      "position": [
+        2352,
+        1392
+      ],
+      "parameters": {
+        "name": "pr_description",
+        "fields": {
+          "values": [
+            {
+              "name": "branch",
+              "stringValue": "={{ $fromAI('branch', 'The branch name') }}"
+            },
+            {
+              "name": "diff_summary",
+              "stringValue": "={{ $fromAI('diff_summary', 'Summary of what changed in the diff') }}"
+            }
+          ]
+        },
+        "workflowId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "00000008-0000-4000-0000-000000000008"
+        },
+        "description": "Write a GitHub PR title and description from a branch name and diff summary."
+      },
+      "typeVersion": 1.2
+    },
+    {
+      "id": "tool0001-0009-4000-0000-000000000009",
+      "name": "Tool \u2014 Transform JSON",
+      "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
+      "position": [
+        2480,
+        1392
+      ],
+      "parameters": {
+        "name": "transform_json",
+        "fields": {
+          "values": [
+            {
+              "name": "data",
+              "stringValue": "={{ $fromAI('data', 'The JSON data to transform') }}"
+            },
+            {
+              "name": "instruction",
+              "stringValue": "={{ $fromAI('instruction', 'How to transform the data') }}"
+            }
+          ]
+        },
+        "workflowId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "00000009-0000-4000-0000-000000000009"
+        },
+        "description": "Transform a JSON object according to an instruction. Returns only valid JSON with no explanation."
+      },
+      "typeVersion": 1.2
+    },
+    {
+      "id": "tool0001-0010-4000-0000-000000000010",
+      "name": "Tool \u2014 Test Stubs",
+      "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
+      "position": [
+        2608,
+        1392
+      ],
+      "parameters": {
+        "name": "test_stubs",
+        "fields": {
+          "values": [
+            {
+              "name": "code",
+              "stringValue": "={{ $fromAI('code', 'The function code to generate test stubs for') }}"
+            },
+            {
+              "name": "language",
+              "stringValue": "={{ $fromAI('language', 'Programming language, e.g. python, typescript') }}"
+            }
+          ]
+        },
+        "workflowId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "00000010-0000-4000-0000-000000000010"
+        },
+        "description": "Generate test stubs (structure only, no assertions) for a function. Covers happy path, edge cases, and error cases."
+      },
+      "typeVersion": 1.2
+    },
+    {
+      "id": "f1f1f948-6444-472b-95ae-34357c6dea11",
+      "name": "Is Callback?",
+      "type": "n8n-nodes-base.if",
+      "position": [
+        -180,
+        300
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "version": 2,
+            "leftValue": "",
+            "caseSensitive": false,
+            "typeValidation": "loose"
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "cond-callback",
+              "operator": {
+                "type": "object",
+                "operation": "exists",
+                "singleValue": true
+              },
+              "leftValue": "={{ $json.callback_query }}"
+            }
+          ]
+        }
+      },
+      "typeVersion": 2
+    },
+    {
+      "id": "10605305-b9b2-42f3-9b7a-5677c97c364b",
+      "name": "Handle Email Callback",
+      "type": "n8n-nodes-base.code",
+      "position": [
+        60,
+        100
+      ],
+      "parameters": {
+        "jsCode": "const fs = require('fs');\nconst cq = $input.first().json.callback_query;\nconst data = cq?.data || '';\nconst callbackId = cq?.id;\nconst chatId = cq?.message?.chat?.id;\n\n// Parse: email_ok::MSG_ID or email_noise::MSG_ID\nconst [action, msgId] = data.split('::');\nif (!action || !msgId || !action.startsWith('email_')) {\n  return [{ json: { callbackId, chatId, handled: false, note: 'not email callback' } }];\n}\n\nconst label = action === 'email_ok' ? 'important' : 'noise';\n\n// Load signals file\nconst sigPath = '/memory/email_signals.json';\nlet store = { signals: [], pending: {} };\ntry { store = JSON.parse(fs.readFileSync(sigPath, 'utf8')); } catch(e) {}\n\n// Get context from pending\nconst pending = store.pending?.[msgId] || {};\nconst fromEmail = pending.from_email || 'unknown';\nconst fromName = pending.from_name || '';\nconst subject = pending.subject || '';\n\n// Update or add signal\nconst existing = store.signals.find(s => s.from_email === fromEmail);\nif (existing) {\n  existing.label = label;\n  existing.count = (existing.count || 1) + 1;\n  existing.last_subject = subject;\n} else {\n  store.signals.push({ from_email: fromEmail, from_name: fromName, last_subject: subject, label, count: 1 });\n}\n\n// Remove from pending\ndelete store.pending[msgId];\nfs.writeFileSync(sigPath, JSON.stringify(store, null, 2));\n\nreturn [{ json: { callbackId, chatId, label, fromEmail, handled: true } }];"
+      },
+      "typeVersion": 2
+    },
+    {
+      "id": "7771a83b-4c80-401b-989a-33af5bb5aa3b",
+      "name": "Answer Callback",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [
+        300,
+        100
+      ],
+      "parameters": {
+        "url": "=https://api.telegram.org/bot{{ $env.TELEGRAM_BOT_TOKEN }}/answerCallbackQuery",
+        "method": "POST",
+        "options": {},
+        "jsonBody": "={{ JSON.stringify({ callback_query_id: $json.callbackId, text: $json.label === \"important\" ? \"\u2713 Marked important\" : \"\u2713 Marked as noise\", show_alert: false }) }}",
+        "sendBody": true,
+        "specifyBody": "json"
+      },
+      "typeVersion": 4.2
+    },
+    {
+      "id": "cc000001-0000-4000-0000-000000000001",
+      "name": "Is Command?",
+      "type": "n8n-nodes-base.if",
+      "position": [
+        688,
+        1248
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "version": 2,
+            "leftValue": "",
+            "caseSensitive": false,
+            "typeValidation": "loose"
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "cond-is-command",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              },
+              "leftValue": "={{ $json.message_text?.startsWith('/') === true }}"
+            }
+          ]
+        }
+      },
+      "typeVersion": 2
+    },
+    {
+      "id": "cc000002-0000-4000-0000-000000000002",
+      "name": "Route Command",
+      "type": "n8n-nodes-base.switch",
+      "position": [
+        912,
+        1100
+      ],
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "outputKey": "listprojects",
+              "conditions": {
+                "options": {
+                  "version": 2,
+                  "leftValue": "",
+                  "caseSensitive": false,
+                  "typeValidation": "loose"
+                },
+                "combinator": "and",
+                "conditions": [
+                  {
+                    "id": "cond-listprojects",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "leftValue": "={{ $json.message_text.split(' ')[0].toLowerCase() }}",
+                    "rightValue": "/listprojects"
+                  }
+                ]
+              },
+              "renameOutput": true
+            },
+            {
+              "outputKey": "project",
+              "conditions": {
+                "options": {
+                  "version": 2,
+                  "leftValue": "",
+                  "caseSensitive": false,
+                  "typeValidation": "loose"
+                },
+                "combinator": "and",
+                "conditions": [
+                  {
+                    "id": "cond-project",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "leftValue": "={{ $json.message_text.split(' ')[0].toLowerCase() }}",
+                    "rightValue": "/project"
+                  }
+                ]
+              },
+              "renameOutput": true
+            },
+            {
+              "outputKey": "setproject",
+              "conditions": {
+                "options": {
+                  "version": 2,
+                  "leftValue": "",
+                  "caseSensitive": false,
+                  "typeValidation": "loose"
+                },
+                "combinator": "and",
+                "conditions": [
+                  {
+                    "id": "cond-setproject",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "leftValue": "={{ $json.message_text.split(' ')[0].toLowerCase() }}",
+                    "rightValue": "/setproject"
+                  }
+                ]
+              },
+              "renameOutput": true
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra"
+        }
+      },
+      "typeVersion": 3.2
+    },
+    {
+      "id": "cc000003-0000-4000-0000-000000000003",
+      "name": "Handle /listprojects",
+      "type": "n8n-nodes-base.code",
+      "position": [
+        1136,
+        900
+      ],
+      "parameters": {
+        "jsCode": "const fs = require('fs');\nlet projects = [];\nlet current = null;\ntry { const s = JSON.parse(fs.readFileSync('/memory/projects.json', 'utf8')); projects = s.projects || []; } catch(e) {}\ntry { const s = JSON.parse(fs.readFileSync('/memory/current_project.json', 'utf8')); current = s.currentProject || null; } catch(e) {}\nconst list = projects.length > 0\n  ? projects.map((p, i) => (i+1) + '. ' + p + (p === current ? ' \u2705' : '')).join('\\n')\n  : 'No projects found.';\nconst reply = '\ud83d\udcc1 <b>Projects:</b>\\n\\n' + list + '\\n\\n<i>Use /setproject &lt;name&gt; to select one</i>';\nreturn [{ json: { reply, chat_id: $input.first().json.chat_id } }];"
+      },
+      "typeVersion": 2
+    },
+    {
+      "id": "cc000004-0000-4000-0000-000000000004",
+      "name": "Handle /project",
+      "type": "n8n-nodes-base.code",
+      "position": [
+        1136,
+        1020
+      ],
+      "parameters": {
+        "jsCode": "const fs = require('fs');\nlet current = null;\ntry {\n  const store = JSON.parse(fs.readFileSync('/memory/current_project.json', 'utf8'));\n  current = store.currentProject || null;\n} catch(e) {}\nconst reply = current\n  ? '\ud83d\udccc <b>Current project:</b> ' + current + '\\n<code>/mnt/data/projects/' + current + '</code>\\n\\nSend me any task and I will run it via Claude Code.'\n  : '\u274c No project set.\\n\\nUse /setproject &lt;name&gt; to select one, or /listprojects to see available projects.';\nreturn [{ json: { reply, chat_id: $input.first().json.chat_id } }];"
+      },
+      "typeVersion": 2
+    },
+    {
+      "id": "cc000005-0000-4000-0000-000000000005",
+      "name": "Extract Setproject Arg",
+      "type": "n8n-nodes-base.code",
+      "position": [
+        1136,
+        1140
+      ],
+      "parameters": {
+        "jsCode": "const fs = require('fs');\nconst text = $input.first().json.message_text || '';\nconst chat_id = $input.first().json.chat_id;\nconst parts = text.trim().split(/\\s+/);\nconst arg = parts.slice(1).join(' ').trim().toLowerCase();\nif (!arg) {\n  return [{ json: { noArg: true, matched: null, arg: '', projects: [], chat_id,\n    reply: 'Usage: /setproject &lt;project-name&gt;\\n\\nUse /listprojects to see available projects.' } }];\n}\nlet projects = [];\ntry {\n  const store = JSON.parse(fs.readFileSync('/memory/projects.json', 'utf8'));\n  projects = store.projects || [];\n} catch(e) {}\nconst exact = projects.find(p => p.toLowerCase() === arg);\nreturn [{ json: { noArg: false, matched: exact || null, arg, projects, chat_id } }];"
+      },
+      "typeVersion": 2
+    },
+    {
+      "id": "cc000006-0000-4000-0000-000000000006",
+      "name": "Exact Match?",
+      "type": "n8n-nodes-base.if",
+      "position": [
+        1360,
+        1140
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "version": 2,
+            "leftValue": "",
+            "caseSensitive": false,
+            "typeValidation": "loose"
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "cond-exact",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              },
+              "leftValue": "={{ $json.noArg === true || $json.matched !== null }}"
+            }
+          ]
+        }
+      },
+      "typeVersion": 2
+    },
+    {
+      "id": "cc000007-0000-4000-0000-000000000007",
+      "name": "Set Project & Reply",
+      "type": "n8n-nodes-base.code",
+      "position": [
+        1584,
+        1020
+      ],
+      "parameters": {
+        "jsCode": "const fs = require('fs');\nconst item = $input.first().json;\nif (item.noArg) {\n  return [{ json: { reply: item.reply, chat_id: item.chat_id } }];\n}\nfs.writeFileSync('/memory/current_project.json', JSON.stringify({ currentProject: item.matched }));\nconst reply = '\u2705 Project set to <b>' + item.matched + '</b>\\n<code>/mnt/data/projects/' + item.matched + '</code>\\n\\nSend me any task and Claude Code will work on it.';\nreturn [{ json: { reply, chat_id: item.chat_id } }];"
+      },
+      "typeVersion": 2
+    },
+    {
+      "id": "cc000008-0000-4000-0000-000000000008",
+      "name": "Qwen Fuzzy Match",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [
+        1584,
+        1260
+      ],
+      "parameters": {
+        "url": "http://host.docker.internal:11434/api/chat",
+        "method": "POST",
+        "options": {},
+        "jsonBody": "={{ JSON.stringify({ model: 'qwen2.5:14b', stream: false, options: { temperature: 0 }, messages: [{ role: 'user', content: 'Project list: ' + JSON.stringify($json.projects) + '\\nUser typed: \"' + $json.arg + '\"\\nReturn ONLY the closest matching project name from the list. No explanation, no quotes, just the name.' }] }) }}",
+        "sendBody": true,
+        "specifyBody": "json"
+      },
+      "typeVersion": 4.2
+    },
+    {
+      "id": "cc000009-0000-4000-0000-000000000009",
+      "name": "Parse & Set Project",
+      "type": "n8n-nodes-base.code",
+      "position": [
+        1808,
+        1260
+      ],
+      "parameters": {
+        "jsCode": "const fs = require('fs');\nconst content = ($input.first().json.message?.content || '').trim();\nconst origItem = $('Extract Setproject Arg').first().json;\nconst projects = origItem.projects || [];\nconst chat_id = origItem.chat_id;\nconst matched = projects.find(p => p.toLowerCase() === content.toLowerCase()) || content;\nfs.writeFileSync('/memory/current_project.json', JSON.stringify({ currentProject: matched }));\nconst reply = '\u2705 Project set to <b>' + matched + '</b> <i>(closest match to \"' + origItem.arg + '\")</i>\\n<code>/mnt/data/projects/' + matched + '</code>\\n\\nSend me any task and Claude Code will work on it.';\nreturn [{ json: { reply, chat_id } }];"
+      },
+      "typeVersion": 2
+    },
+    {
+      "id": "cc000010-0000-4000-0000-000000000010",
+      "name": "Unknown Command",
+      "type": "n8n-nodes-base.code",
+      "position": [
+        1136,
+        780
+      ],
+      "parameters": {
+        "jsCode": "const cmd = ($input.first().json.message_text || '').split(' ')[0];\nconst reply = '\u2753 Unknown command: <code>' + cmd + '</code>\\n\\nAvailable commands:\\n/setproject &lt;name&gt; \u2014 set active project\\n/project \u2014 show current project\\n/listprojects \u2014 list all projects';\nreturn [{ json: { reply, chat_id: $input.first().json.chat_id } }];"
+      },
+      "typeVersion": 2
+    },
+    {
+      "id": "cc000011-0000-4000-0000-000000000011",
+      "name": "Send Command Reply",
+      "type": "n8n-nodes-base.telegram",
+      "position": [
+        2032,
+        1020
+      ],
+      "parameters": {
+        "text": "={{ $json.reply }}",
+        "chatId": "={{ $json.chat_id }}",
+        "additionalFields": {
+          "parse_mode": "HTML"
+        }
+      },
+      "credentials": {
+        "telegramApi": {
+          "id": "Z8q2xwxyJY7RguGl",
+          "name": "Telegram account"
+        }
+      },
+      "typeVersion": 1.2
+    },
+    {
+      "id": "cc000012-0000-4000-0000-000000000012",
+      "name": "Is Project Set?",
+      "type": "n8n-nodes-base.if",
+      "position": [
+        1136,
+        1380
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "version": 2,
+            "leftValue": "",
+            "caseSensitive": false,
+            "typeValidation": "loose"
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "cond-project-set",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              },
+              "leftValue": "={{ !!$json.currentProject }}"
+            }
+          ]
+        }
+      },
+      "typeVersion": 2
+    },
+    {
+      "id": "cc000013-0000-4000-0000-000000000013",
+      "name": "Build Relay Input",
+      "type": "n8n-nodes-base.code",
+      "position": [
+        1136,
+        1500
+      ],
+      "parameters": {
+        "jsCode": "const fs = require('fs');\nlet project = null;\ntry {\n  const store = JSON.parse(fs.readFileSync('/memory/current_project.json', 'utf8'));\n  project = store.currentProject || null;\n} catch(e) {}\n\nconst cwd     = project ? '/mnt/data/projects/' + project : '/mnt/data/Bill';\nconst docsBase = project\n  ? '/mnt/data/projects/' + project + '/docs'\n  : '/mnt/data/Bill/docs';\n\nconst msg     = $('Extract Message').item.json.message_text;\nconst chat_id = $('Extract Message').item.json.chat_id;\n\nlet system = '';\ntry {\n  system = fs.readFileSync('/memory/relay-system-prompt.txt', 'utf8').trim();\n} catch(e) {}\n\n// Inject last exchange as immediate short-term context\nlet recentContext = '';\ntry {\n  const last = JSON.parse(fs.readFileSync('/memory/last_exchange.json', 'utf8'));\n  if (last.user && last.bot) {\n    recentContext = 'RECENT CONVERSATION (immediately before this message):\\nUser: ' + last.user + '\\nAssistant: ' + last.bot + '\\n\\n';\n  }\n} catch(e) {}\n\n// Qdrant memory injection removed \u2014 stored bot responses poisoned Claude context.\n// last_exchange.json provides sufficient immediate context.\n\nreturn [{ json: { cwd, docsBase, prompt: recentContext + msg, system, message_text: msg, chat_id, project } }];"
+      },
+      "typeVersion": 2
+    },
+    {
+      "id": "cc000017-0000-4000-0000-000000000017",
+      "name": "Send Relay Reply",
+      "type": "n8n-nodes-base.telegram",
+      "position": [
+        1660,
+        1500
+      ],
+      "parameters": {
+        "text": "={{ $json.reply }}",
+        "chatId": "={{ $json.chat_id }}",
+        "additionalFields": {
+          "parse_mode": "HTML"
+        }
+      },
+      "credentials": {
+        "telegramApi": {
+          "id": "Z8q2xwxyJY7RguGl",
+          "name": "Telegram account"
+        }
+      },
+      "typeVersion": 1.2
+    },
+    {
+      "id": "cc000018-0000-4000-0000-000000000018",
+      "name": "Handle Relay Result",
+      "type": "n8n-nodes-base.code",
+      "onError": "continueErrorOutput",
+      "position": [
+        1540,
+        1500
+      ],
+      "parameters": {
+        "jsCode": "const item = $input.first().json;\nconst chat_id = $('Extract Message').item.json.chat_id;\nif (item.error) {\n  return [{ json: { reply: '\u26a0\ufe0f Claude Code failed:\\n<code>' + (item.error.message || item.error) + '</code>', chat_id, hasFile: false } }];\n}\nif (!item.ok && item.output) {\n  return [{ json: { reply: '\u26a0\ufe0f Claude returned an error:\\n<code>' + item.output + '</code>', chat_id, hasFile: false } }];\n}\nconst out = (item.output || '').trim();\nif (!out) {\n  return [{ json: { reply: '\u26a0\ufe0f Claude Code returned no output.', chat_id, hasFile: false } }];\n}\n\n// Detect [FILE:/absolute/path] marker \u2014 last match wins\nconst fileMatch = [...out.matchAll(/\\[FILE:([^\\]]+)\\]/g)].pop();\nif (fileMatch) {\n  const hostPath = fileMatch[1].trim();\n  // Translate host paths to container paths\n  let containerPath = hostPath\n    .replace('/mnt/data/projects/', '/projects/')\n    .replace('/mnt/data/Bill/', '/bill/');\n  const description = out.replace(/\\[FILE:[^\\]]+\\]/g, '').trim();\n  return [{ json: { reply: description || 'Document ready.', chat_id, hasFile: true, filePath: containerPath, hostPath } }];\n}\n\nreturn [{ json: { reply: out, chat_id, hasFile: false } }];"
+      },
+      "typeVersion": 2
+    },
+    {
+      "id": "cc000019-0000-4000-0000-000000000019",
+      "name": "Load Project State",
+      "type": "n8n-nodes-base.code",
+      "position": [
+        912,
+        1380
+      ],
+      "parameters": {
+        "jsCode": "const fs = require('fs');\nconst item = $input.first().json;\nlet currentProject = null;\ntry {\n  const store = JSON.parse(fs.readFileSync('/memory/current_project.json', 'utf8'));\n  currentProject = store.currentProject || null;\n} catch(e) {}\nreturn [{ json: { ...item, currentProject } }];"
+      },
+      "typeVersion": 2
+    },
+    {
+      "id": "cc000020-0000-4000-0000-000000000020",
+      "name": "Claude HTTP",
+      "type": "n8n-nodes-base.code",
+      "position": [
+        1360,
+        1500
+      ],
+      "parameters": {
+        "jsCode": "const http = require('http');\n\nconst chat_id = $json.chat_id;\nconst payload  = JSON.stringify({\n  prompt: $json.prompt,\n  cwd:    $json.cwd,\n  system: $json.system || ''\n});\n\nreturn new Promise((resolve, reject) => {\n  const req = http.request({\n    hostname: 'mcp-shell',\n    port:     3007,\n    path:     '/claude',\n    method:   'POST',\n    headers: {\n      'Content-Type':   'application/json',\n      'Content-Length': Buffer.byteLength(payload)\n    },\n    timeout: 300000\n  }, (res) => {\n    let data = '';\n    res.on('data', c => { data += c; });\n    res.on('end', () => {\n      try {\n        const json = JSON.parse(data);\n        resolve([{ json: { ...json, chat_id } }]);\n      } catch(e) {\n        reject(new Error('Bad JSON from claude-http-server: ' + data.slice(0, 200)));\n      }\n    });\n  });\n  req.on('timeout', () => {\n    req.destroy();\n    reject(new Error('Claude HTTP request timed out after 300s'));\n  });\n  req.on('error', reject);\n  req.write(payload);\n  req.end();\n});"
+      },
+      "typeVersion": 2
+    },
+    {
+      "id": "cc000030-0000-4000-0000-000000000030",
+      "name": "Document Loader \u2014 Relay",
+      "type": "@n8n/n8n-nodes-langchain.documentDefaultDataLoader",
+      "position": [
+        1780,
+        1640
+      ],
+      "parameters": {
+        "options": {},
+        "jsonData": "={{ JSON.stringify({ text: $('Extract Message').item.json.message_text + '\\n\\nAssistant: ' + $('Handle Relay Result').item.json.reply, source: 'telegram_relay', username: $('Extract Message').item.json.username, timestamp: $('Extract Message').item.json.timestamp, project: $('Build Relay Input').item.json.project }) }}",
+        "jsonMode": "expressionData"
+      },
+      "typeVersion": 1
+    },
+    {
+      "id": "cc000031-0000-4000-0000-000000000031",
+      "name": "Text Splitter \u2014 Relay",
+      "type": "@n8n/n8n-nodes-langchain.textSplitterRecursiveCharacterTextSplitter",
+      "position": [
+        1780,
+        1740
+      ],
+      "parameters": {
+        "options": {},
+        "chunkOverlap": 100
+      },
+      "typeVersion": 1
+    },
+    {
+      "id": "cc000032-0000-4000-0000-000000000032",
+      "name": "Embeddings \u2014 Relay",
+      "type": "@n8n/n8n-nodes-langchain.embeddingsOllama",
+      "position": [
+        1960,
+        1640
+      ],
+      "parameters": {
+        "model": "nomic-embed-text:latest",
+        "options": {}
+      },
+      "credentials": {
+        "ollamaApi": {
+          "id": "Qs8Dh8bkuU19W10U",
+          "name": "Ollama account"
+        }
+      },
+      "typeVersion": 1.1
+    },
+    {
+      "id": "cc000033-0000-4000-0000-000000000033",
+      "name": "Store Relay Conversation",
+      "type": "@n8n/n8n-nodes-langchain.vectorStoreQdrant",
+      "position": [
+        1960,
+        1500
+      ],
+      "parameters": {
+        "mode": "insert",
+        "options": {
+          "metadata": {
+            "metadataValues": [
+              {
+                "name": "source",
+                "value": "relay"
+              },
+              {
+                "name": "project",
+                "value": "={{ $('Build Relay Input').item.json.project }}"
+              },
+              {
+                "name": "username",
+                "value": "={{ $('Extract Message').item.json.username }}"
+              }
+            ]
+          }
+        },
+        "qdrantCollection": {
+          "__rl": true,
+          "mode": "id",
+          "value": "agent_memory"
+        }
+      },
+      "credentials": {
+        "qdrantApi": {
+          "id": "aWAok1h2HHdNtmht",
+          "name": "Qdrant account"
+        }
+      },
+      "typeVersion": 1.1
+    },
+    {
+      "id": "cc000034-0000-4000-0000-000000000034",
+      "name": "Embed Query",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [
+        1136,
+        1620
+      ],
+      "parameters": {
+        "url": "http://host.docker.internal:11434/api/embeddings",
+        "method": "POST",
+        "options": {
+          "timeout": 15000,
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        },
+        "jsonBody": "={{ JSON.stringify({ model: 'nomic-embed-text:latest', prompt: $json.message_text }) }}",
+        "sendBody": true,
+        "specifyBody": "json"
+      },
+      "typeVersion": 4.2
+    },
+    {
+      "id": "cc000035-0000-4000-0000-000000000035",
+      "name": "Search Memory",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [
+        1136,
+        1720
+      ],
+      "parameters": {
+        "url": "http://qdrant:6333/collections/agent_memory/points/search",
+        "method": "POST",
+        "options": {
+          "timeout": 10000,
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        },
+        "jsonBody": "={{ JSON.stringify({ vector: $json.embedding, limit: 4, with_payload: true, score_threshold: 0.6 }) }}",
+        "sendBody": true,
+        "specifyBody": "json"
+      },
+      "typeVersion": 4.2
+    },
+    {
+      "id": "cc000036-0000-4000-0000-000000000036",
+      "name": "Is File Reply?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1560,
+        1500
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "version": 2,
+            "leftValue": "",
+            "caseSensitive": false,
+            "typeValidation": "loose"
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "cond-has-file",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              },
+              "leftValue": "={{ $json.hasFile === true }}"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "cc000037-0000-4000-0000-000000000037",
+      "name": "Send Routing Keyboard",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1760,
+        1380
+      ],
+      "parameters": {
+        "jsCode": "const https = require('https');\n\nconst chat_id = $('Handle Relay Result').item.json.chat_id;\nconst filePath = $('Handle Relay Result').item.json.filePath;\nconst reply = ($('Handle Relay Result').item.json.reply || '').trim();\nconst token = $env.TELEGRAM_BOT_TOKEN;\n\nconst filename = filePath.split('/').pop();\nconst description = reply.replace(/\\[FILE:[^\\]]+\\]\\s*$/, '').trim();\nconst text = (description ? description + '\\n\\n' : '') +\n  '\\u{1F4C4} \"' + filename + '\" is ready \u2014 where should I send it?';\n\nconst keyboard = {\n  inline_keyboard: [[\n    { text: '\\u{1F4F1} Telegram', callback_data: 'doc_tg::' + filePath },\n    { text: '\\u{1F4E7} Email',    callback_data: 'doc_email::' + filePath },\n    { text: '\\u{1F4BE} Save only', callback_data: 'doc_save::' + filePath }\n  ]]\n};\n\nconst body = JSON.stringify({ chat_id, text, reply_markup: keyboard });\n\nreturn new Promise((resolve, reject) => {\n  const req = https.request({\n    hostname: 'api.telegram.org',\n    path: '/bot' + token + '/sendMessage',\n    method: 'POST',\n    headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) }\n  }, (res) => {\n    let data = '';\n    res.on('data', c => data += c);\n    res.on('end', () => {\n      try {\n        const json = JSON.parse(data);\n        if (!json.ok) return reject(new Error('Telegram error: ' + data));\n        resolve([{ json: { sent: true, file: filePath, chat_id } }]);\n      } catch(e) { reject(e); }\n    });\n  });\n  req.on('error', reject);\n  req.write(body);\n  req.end();\n});"
+      }
+    },
+    {
+      "id": "cc000038-0000-4000-0000-000000000038",
+      "name": "Write Recent Context",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1760,
+        1500
+      ],
+      "parameters": {
+        "jsCode": "const fs = require('fs');\nconst item = $input.first().json;\nconst userMsg = $('Extract Message').item.json.message_text || '';\nconst botReply = item.reply || '';\nconst project  = $('Build Relay Input').item.json.project || null;\n\ntry {\n  fs.writeFileSync('/memory/last_exchange.json', JSON.stringify({\n    user: userMsg,\n    bot: botReply,\n    project,\n    timestamp: new Date().toISOString()\n  }));\n} catch(e) {}\n\nreturn [$input.first()];"
+      }
+    },
+    {
+      "id": "rc000001-0000-4000-0000-000000000001",
+      "name": "Route Callback",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        60,
+        300
+      ],
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "outputKey": "doc",
+              "renameOutput": true,
+              "conditions": {
+                "options": {
+                  "version": 2,
+                  "leftValue": "",
+                  "caseSensitive": false,
+                  "typeValidation": "loose"
+                },
+                "combinator": "and",
+                "conditions": [
+                  {
+                    "id": "cond-doc-callback",
+                    "operator": {
+                      "type": "string",
+                      "operation": "startsWith"
+                    },
+                    "leftValue": "={{ $json.callback_query.data }}",
+                    "rightValue": "doc_"
+                  }
+                ]
+              }
+            },
+            {
+              "outputKey": "email",
+              "renameOutput": true,
+              "conditions": {
+                "options": {
+                  "version": 2,
+                  "leftValue": "",
+                  "caseSensitive": false,
+                  "typeValidation": "loose"
+                },
+                "combinator": "and",
+                "conditions": [
+                  {
+                    "id": "cond-email-callback",
+                    "operator": {
+                      "type": "string",
+                      "operation": "startsWith"
+                    },
+                    "leftValue": "={{ $json.callback_query.data }}",
+                    "rightValue": "email_"
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra"
+        }
+      }
+    },
+    {
+      "id": "rc000002-0000-4000-0000-000000000002",
+      "name": "Handle Doc Callback",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        300,
+        300
+      ],
+      "parameters": {
+        "jsCode": "const fs = require('fs');\nconst https = require('https');\nconst path = require('path');\n\nconst cq = $input.first().json.callback_query;\nconst data = cq?.data || '';\nconst callbackId = cq?.id;\nconst chatId = cq?.message?.chat?.id;\nconst token = $env.TELEGRAM_BOT_TOKEN;\n\nconst sepIdx = data.indexOf('::');\nconst action = sepIdx >= 0 ? data.substring(0, sepIdx) : data;\nconst filePath = sepIdx >= 0 ? data.substring(sepIdx + 2) : '';\n\nif (action === 'doc_save') {\n  return [{ json: { callbackId, chatId, ackText: '\u2713 Saved to /memory/tmp/' } }];\n}\n\nif (action === 'doc_email') {\n  return [{ json: { callbackId, chatId, ackText: '\\u{1F4E7} Email delivery not yet configured' } }];\n}\n\nif (action === 'doc_tg') {\n  if (!filePath || !fs.existsSync(filePath)) {\n    return [{ json: { callbackId, chatId, ackText: '\u26a0\ufe0f File not found' } }];\n  }\n\n  const fileContent = fs.readFileSync(filePath);\n  const filename = path.basename(filePath);\n  const boundary = '----TGBoundary' + Date.now();\n  const CRLF = '\\r\\n';\n\n  const part = (name, val) =>\n    '--' + boundary + CRLF +\n    'Content-Disposition: form-data; name=\"' + name + '\"' + CRLF + CRLF + val + CRLF;\n\n  const prologue = Buffer.from([\n    part('chat_id', String(chatId)),\n    '--' + boundary + CRLF +\n    'Content-Disposition: form-data; name=\"document\"; filename=\"' + filename + '\"' + CRLF +\n    'Content-Type: text/html; charset=utf-8' + CRLF + CRLF\n  ].join(''));\n  const epilogue = Buffer.from(CRLF + '--' + boundary + '--' + CRLF);\n  const body = Buffer.concat([prologue, fileContent, epilogue]);\n\n  return new Promise((resolve, reject) => {\n    const req = https.request({\n      hostname: 'api.telegram.org',\n      path: '/bot' + token + '/sendDocument',\n      method: 'POST',\n      headers: {\n        'Content-Type': 'multipart/form-data; boundary=' + boundary,\n        'Content-Length': body.length\n      },\n      timeout: 30000\n    }, (res) => {\n      let d = '';\n      res.on('data', c => d += c);\n      res.on('end', () => {\n        try {\n          const json = JSON.parse(d);\n          if (!json.ok) return reject(new Error('Telegram: ' + d));\n          // Clean up temp file after successful send\n          try { fs.unlinkSync(filePath); } catch(e) {}\n          resolve([{ json: { callbackId, chatId, ackText: '\\u{1F4CE} Sent!' } }]);\n        } catch(e) { reject(e); }\n      });\n    });\n    req.on('error', reject);\n    req.write(body);\n    req.end();\n  });\n}\n\nreturn [{ json: { callbackId, chatId, ackText: 'Unknown callback' } }];"
+      }
+    },
+    {
+      "id": "rc000003-0000-4000-0000-000000000003",
+      "name": "Answer Doc Callback",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        540,
+        300
+      ],
+      "parameters": {
+        "url": "=https://api.telegram.org/bot{{ $env.TELEGRAM_BOT_TOKEN }}/answerCallbackQuery",
+        "method": "POST",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ callback_query_id: $json.callbackId, text: $json.ackText, show_alert: false }) }}",
+        "options": {}
+      }
+    },
+    {
+      "id": "rag00015-0000-4000-0000-000000000015",
+      "name": "Embeddings \u2014 Project RAG (Coding)",
+      "type": "@n8n/n8n-nodes-langchain.embeddingsOllama",
+      "position": [
+        992,
+        1600
+      ],
+      "parameters": {
+        "model": "granite-embedding:278m"
+      },
+      "credentials": {
+        "ollamaApi": {
+          "id": "Qs8Dh8bkuU19W10U",
+          "name": "Ollama account"
+        }
+      },
+      "typeVersion": 1
+    },
+    {
+      "id": "rag00016-0000-4000-0000-000000000016",
+      "name": "Project RAG \u2014 Coding",
+      "type": "@n8n/n8n-nodes-langchain.vectorStoreQdrant",
+      "position": [
+        912,
+        1392
+      ],
+      "parameters": {
+        "mode": "retrieve-as-tool",
+        "options": {},
+        "toolName": "search_project_rag",
+        "toolDescription": "Search indexed project files (code, docs, configs) across /mnt/data/projects by semantic similarity. Returns matching chunks with filepath, filename, filetype, project, chunk_type, topics, and summary metadata.",
+        "qdrantCollection": {
+          "__rl": true,
+          "mode": "id",
+          "value": "project_rag"
+        }
+      },
+      "credentials": {
+        "qdrantApi": {
+          "id": "aWAok1h2HHdNtmht",
+          "name": "Qdrant account"
+        }
+      },
+      "typeVersion": 1.1
+    }
+  ],
+  "connections": {
+    "Gmail MCP": {
+      "ai_tool": [
+        [
+          {
+            "node": "Email Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Shell MCP": {
+      "ai_tool": [
+        [
+          {
+            "node": "Coding Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GitHub MCP": {
+      "ai_tool": [
+        [
+          {
+            "node": "Coding Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claude HTTP": {
+      "main": [
+        [
+          {
+            "node": "Handle Relay Result",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Handle Relay Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Email Agent": {
+      "main": [
+        [
+          {
+            "node": "Merge Responses",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Embed Query": {
+      "main": [
+        [
+          {
+            "node": "Search Memory",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Command?": {
+      "main": [
+        [
+          {
+            "node": "Route Command",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Load Project State",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Coding Agent": {
+      "main": [
+        [
+          {
+            "node": "Merge Responses",
+            "type": "main",
+            "index": 2
+          }
+        ]
+      ]
+    },
+    "Exact Match?": {
+      "main": [
+        [
+          {
+            "node": "Set Project & Reply",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Qwen Fuzzy Match",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Callback?": {
+      "main": [
+        [
+          {
+            "node": "Route Callback",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Extract Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "General Agent": {
+      "main": [
+        [
+          {
+            "node": "Merge Responses",
+            "type": "main",
+            "index": 4
+          }
+        ]
+      ]
+    },
+    "Route Command": {
+      "main": [
+        [
+          {
+            "node": "Handle /listprojects",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Handle /project",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Extract Setproject Arg",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Unknown Command",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Search Memory": {
+      "main": [
+        [
+          {
+            "node": "Build Relay Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Drafting Agent": {
+      "main": [
+        [
+          {
+            "node": "Merge Responses",
+            "type": "main",
+            "index": 3
+          }
+        ]
+      ]
+    },
+    "Playwright MCP": {
+      "ai_tool": [
+        [
+          {
+            "node": "Research Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Research Agent": {
+      "main": [
+        [
+          {
+            "node": "Merge Responses",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Tool \u2014 Regex": {
+      "ai_tool": [
+        [
+          {
+            "node": "Coding Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Message": {
+      "main": [
+        [
+          {
+            "node": "Is Command?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Handle /project": {
+      "main": [
+        [
+          {
+            "node": "Send Command Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Project Set?": {
+      "main": [
+        [
+          {
+            "node": "Embed Query",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Embed Query",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge Responses": {
+      "main": [
+        [
+          {
+            "node": "Store Conversation",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Send Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route by Intent": {
+      "main": [
+        [
+          {
+            "node": "Email Agent",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Research Agent",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Coding Agent",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Drafting Agent",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "General Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Unknown Command": {
+      "main": [
+        [
+          {
+            "node": "Send Command Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Memory \u2014 Email": {
+      "ai_tool": [
+        [
+          {
+            "node": "Email Agent",
+            "type": "ai_tool",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Ollama \u2014 Email": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Email Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Qwen Fuzzy Match": {
+      "main": [
+        [
+          {
+            "node": "Parse & Set Project",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Relay Reply": {
+      "main": [
+        [
+          {
+            "node": "Store Relay Conversation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Telegram Trigger": {
+      "main": [
+        [
+          {
+            "node": "Is Callback?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Relay Input": {
+      "main": [
+        [
+          {
+            "node": "Claude HTTP",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Memory \u2014 Coding": {
+      "ai_tool": [
+        [
+          {
+            "node": "Coding Agent",
+            "type": "ai_tool",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Load Project State": {
+      "main": [
+        [
+          {
+            "node": "Is Project Set?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Memory \u2014 General": {
+      "ai_tool": [
+        [
+          {
+            "node": "General Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Tool \u2014 Changelog": {
+      "ai_tool": [
+        [
+          {
+            "node": "Coding Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Handle Relay Result": {
+      "main": [
+        [
+          {
+            "node": "Write Recent Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Memory \u2014 Drafting": {
+      "ai_tool": [
+        [
+          {
+            "node": "Drafting Agent",
+            "type": "ai_tool",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Memory \u2014 Research": {
+      "ai_tool": [
+        [
+          {
+            "node": "Research Agent",
+            "type": "ai_tool",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Parse & Set Project": {
+      "main": [
+        [
+          {
+            "node": "Send Command Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set Project & Reply": {
+      "main": [
+        [
+          {
+            "node": "Send Command Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Tool \u2014 Test Stubs": {
+      "ai_tool": [
+        [
+          {
+            "node": "Coding Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Embeddings \u2014 Email": {
+      "ai_embedding": [
+        [
+          {
+            "node": "Memory \u2014 Email",
+            "type": "ai_embedding",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Embeddings \u2014 Relay": {
+      "ai_embedding": [
+        [
+          {
+            "node": "Store Relay Conversation",
+            "type": "ai_embedding",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Embeddings \u2014 Store": {
+      "ai_embedding": [
+        [
+          {
+            "node": "Store Conversation",
+            "type": "ai_embedding",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Handle /listprojects": {
+      "main": [
+        [
+          {
+            "node": "Send Command Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Embeddings \u2014 Coding": {
+      "ai_embedding": [
+        [
+          {
+            "node": "Memory \u2014 Coding",
+            "type": "ai_embedding",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Handle Email Callback": {
+      "main": [
+        [
+          {
+            "node": "Answer Callback",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenRouter \u2014 Coding": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Coding Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Tool \u2014 Bash Command": {
+      "ai_tool": [
+        [
+          {
+            "node": "Coding Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Embeddings \u2014 General": {
+      "ai_embedding": [
+        [
+          {
+            "node": "Memory \u2014 General",
+            "type": "ai_embedding",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Setproject Arg": {
+      "main": [
+        [
+          {
+            "node": "Exact Match?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenRouter \u2014 General": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "General Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Tool \u2014 Explain Error": {
+      "ai_tool": [
+        [
+          {
+            "node": "Coding Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Embeddings \u2014 Drafting": {
+      "ai_embedding": [
+        [
+          {
+            "node": "Memory \u2014 Drafting",
+            "type": "ai_embedding",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Embeddings \u2014 Research": {
+      "ai_embedding": [
+        [
+          {
+            "node": "Memory \u2014 Research",
+            "type": "ai_embedding",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenRouter \u2014 Drafting": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Drafting Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenRouter \u2014 Research": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Research Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Text Splitter \u2014 Relay": {
+      "ai_textSplitter": [
+        [
+          {
+            "node": "Document Loader \u2014 Relay",
+            "type": "ai_textSplitter",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Text Splitter \u2014 Store": {
+      "ai_textSplitter": [
+        [
+          {
+            "node": "Document Loader \u2014 Store",
+            "type": "ai_textSplitter",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Tool \u2014 Commit Message": {
+      "ai_tool": [
+        [
+          {
+            "node": "Coding Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Tool \u2014 PR Description": {
+      "ai_tool": [
+        [
+          {
+            "node": "Coding Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Tool \u2014 Summarize Code": {
+      "ai_tool": [
+        [
+          {
+            "node": "Coding Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Tool \u2014 Summarize Logs": {
+      "ai_tool": [
+        [
+          {
+            "node": "Coding Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Tool \u2014 Transform JSON": {
+      "ai_tool": [
+        [
+          {
+            "node": "Coding Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Document Loader \u2014 Relay": {
+      "ai_document": [
+        [
+          {
+            "node": "Store Relay Conversation",
+            "type": "ai_document",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Document Loader \u2014 Store": {
+      "ai_document": [
+        [
+          {
+            "node": "Store Conversation",
+            "type": "ai_document",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filesystem MCP \u2014 Coding": {
+      "ai_tool": [
+        [
+          {
+            "node": "Coding Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filesystem MCP \u2014 Drafting": {
+      "ai_tool": [
+        [
+          {
+            "node": "Drafting Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is File Reply?": {
+      "main": [
+        [
+          {
+            "node": "Send Routing Keyboard",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send Relay Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Write Recent Context": {
+      "main": [
+        [
+          {
+            "node": "Is File Reply?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Routing Keyboard": {
+      "main": [
+        [
+          {
+            "node": "Store Relay Conversation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route Callback": {
+      "main": [
+        [
+          {
+            "node": "Handle Doc Callback",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Handle Email Callback",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Handle Doc Callback": {
+      "main": [
+        [
+          {
+            "node": "Answer Doc Callback",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Embeddings \u2014 Project RAG (Coding)": {
+      "ai_embedding": [
+        [
+          {
+            "node": "Project RAG \u2014 Coding",
+            "type": "ai_embedding",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Project RAG \u2014 Coding": {
+      "ai_tool": [
+        [
+          {
+            "node": "Coding Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "binaryMode": "separate"
+  },
+  "staticData": null,
+  "meta": {
+    "templateCredsSetupCompleted": false,
+    "instanceId": "REPLACE_WITH_YOUR_INSTANCE_ID"
+  },
+  "nodeGroups": [],
+  "pinData": {},
+  "versionId": "85da44b2-43b9-409b-8dfa-6d328a6e8c82",
+  "activeVersionId": "85da44b2-43b9-409b-8dfa-6d328a6e8c82",
+  "versionCounter": 57,
+  "triggerCount": 1,
+  "sourceWorkflowId": null,
+  "tags": [
+    {
+      "updatedAt": "2026-06-13T02:16:32.021Z",
+      "createdAt": "2026-06-13T02:16:32.021Z",
+      "id": "9ocNczJ1ft0L5aJS",
+      "name": "telegram"
+    },
+    {
+      "updatedAt": "2026-06-13T02:16:32.021Z",
+      "createdAt": "2026-06-13T02:16:32.021Z",
+      "id": "sjhSECcgflsikZpl",
+      "name": "ai-agent"
+    }
+  ],
+  "shared": [
+    {
+      "updatedAt": "2026-06-13T02:16:32.021Z",
+      "createdAt": "2026-06-13T02:16:32.021Z",
+      "role": "workflow:owner",
+      "workflowId": "13329864-5514-4f83-acf9-a4610cd1e903",
+      "projectId": "Vyx2IP9iq7IBCYYG",
+      "project": {
+        "updatedAt": "2026-06-13T02:13:27.904Z",
+        "createdAt": "2026-06-13T02:05:21.068Z",
+        "id": "Vyx2IP9iq7IBCYYG",
+        "name": "Bill Sowerby <billhc83@gmail.com>",
+        "type": "personal",
+        "icon": null,
+        "description": null,
+        "customTelemetryTags": [],
+        "creatorId": "dfe1c47a-20e9-4352-8fe8-eafb69ff24a1"
+      }
+    }
+  ],
+  "versionMetadata": {
+    "name": null,
+    "description": null
+  }
+}

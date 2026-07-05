@@ -1,0 +1,446 @@
+{
+  "id": "00000012-0000-4000-0000-000000000012",
+  "name": "Email Cron Check",
+  "active": true,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "tags": [
+    {
+      "name": "email"
+    },
+    {
+      "name": "cron"
+    }
+  ],
+  "nodes": [
+    {
+      "id": "18ec9aaf-5dd2-4e3e-bae1-5ae1a375f145",
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        240,
+        300
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 15
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "903f9ad1-56cb-4330-b9d8-8df51eabb7b4",
+      "name": "Load State",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        460,
+        300
+      ],
+      "parameters": {
+        "jsCode": "\nconst fs = require('fs');\nconst sigPath = '/memory/email_signals.json';\nlet store = { signals: [], pending: {} };\ntry { store = JSON.parse(fs.readFileSync(sigPath, 'utf8')); } catch(e) {}\n\nconst sd = $getWorkflowStaticData('global');\nconst lastCheck = sd.lastCheck || new Date(Date.now() - 15*60*1000).toISOString();\nsd.lastCheck = new Date().toISOString();\n\nreturn [{ json: { lastCheck, signals: store.signals, pending: store.pending || {} } }];\n"
+      }
+    },
+    {
+      "id": "2e4b8d31-8fde-45d6-91f3-5f3e7eb4ffff",
+      "name": "Fetch Emails Agent",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.7,
+      "position": [
+        700,
+        300
+      ],
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ 'List all unread emails received after ' + $json.lastCheck + '. Return a JSON array only, no other text.' }}",
+        "options": {
+          "systemMessage": "You are a Gmail fetcher. Use the Gmail search tool to find unread emails received after the given timestamp. For each email return these exact fields: id (Gmail message ID string), from_name (sender display name), from_email (sender email address), subject, date (ISO string), snippet (first 300 chars of body text). Return ONLY a valid JSON array. If no unread emails, return []."
+        }
+      }
+    },
+    {
+      "id": "c2575edc-21a2-4937-bed9-55b9276d983f",
+      "name": "Ollama \u2014 Email Cron",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOllama",
+      "typeVersion": 1,
+      "position": [
+        700,
+        500
+      ],
+      "parameters": {
+        "model": "qwen3-14b-nothink:latest",
+        "options": {}
+      },
+      "credentials": {
+        "ollamaApi": {
+          "id": "Qs8Dh8bkuU19W10U",
+          "name": "Ollama account"
+        }
+      }
+    },
+    {
+      "id": "213f4eab-be78-4c72-93c1-fa420b84b459",
+      "name": "Gmail MCP \u2014 Cron",
+      "type": "@n8n/n8n-nodes-langchain.mcpClientTool",
+      "typeVersion": 1,
+      "position": [
+        860,
+        500
+      ],
+      "parameters": {
+        "sseEndpoint": "http://mcp-gmail:3003/sse",
+        "options": {}
+      }
+    },
+    {
+      "id": "d3c90e88-7954-4e91-b64a-fab900f25702",
+      "name": "Parse & Split",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        960,
+        300
+      ],
+      "parameters": {
+        "jsCode": "\nconst raw = $input.first().json.output || '';\nlet emails = [];\ntry {\n  const match = raw.match(/\\[[\\s\\S]*\\]/);\n  if (match) emails = JSON.parse(match[0]);\n} catch(e) {}\n\nconst sd = $getWorkflowStaticData('global');\nconst seenIds = new Set(sd.seenIds || []);\nconst newEmails = emails.filter(e => e.id && !seenIds.has(e.id));\n\n// Mark all as seen immediately\nnewEmails.forEach(e => seenIds.add(e.id));\nconst arr = Array.from(seenIds);\nsd.seenIds = arr.slice(-600); // keep last 600\n\nif (newEmails.length === 0) return [];\nreturn newEmails.map(e => ({ json: e }));\n"
+      }
+    },
+    {
+      "id": "74416285-3924-4008-b816-5bedfd597734",
+      "name": "Build Triage Body",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1180,
+        300
+      ],
+      "parameters": {
+        "jsCode": "\nconst e = $input.first().json;\nconst sys = 'Is this email spam, a newsletter, marketing, or an automated notification? Return JSON only: {\"skip\": true, \"reason\": \"spam|newsletter|marketing|automated\"}. For genuine personal email, business correspondence, invoice, or anything requiring human attention return {\"skip\": false, \"reason\": \"genuine\"}.';\nreturn [{ json: {\n  model: 'qwen2.5:14b',\n  messages: [\n    { role: 'system', content: sys },\n    { role: 'user', content: 'From: ' + e.from_name + ' <' + e.from_email + '>\\nSubject: ' + e.subject + '\\nPreview: ' + (e.snippet || '') }\n  ],\n  stream: false,\n  options: { temperature: 0.1 }\n}}];\n"
+      }
+    },
+    {
+      "id": "8d9b7184-c6c6-4216-91f4-0f088d499a90",
+      "name": "Qwen Triage",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1400,
+        300
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:11434/api/chat",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json }}",
+        "options": {}
+      }
+    },
+    {
+      "id": "4d3fc432-03ee-4ff2-9f06-2925633ba95d",
+      "name": "Parse Triage",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1620,
+        300
+      ],
+      "parameters": {
+        "jsCode": "\nconst emailData = $('Parse & Split').item.json;\nconst content = $input.first().json.message?.content || '';\nlet triage = { skip: false, reason: 'parse_error' };\ntry {\n  const match = content.match(/\\{[^}]+\\}/);\n  if (match) triage = JSON.parse(match[0]);\n} catch(e) {}\nreturn [{ json: { ...emailData, skip: triage.skip, triage_reason: triage.reason } }];\n"
+      }
+    },
+    {
+      "id": "246f8965-4f1a-421f-8b4d-311540445314",
+      "name": "Skip?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1840,
+        300
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "6d249441-3757-4f91-8fa8-298f2d1effab",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              },
+              "leftValue": "={{ $json.skip }}"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "ff697499-6a35-485f-8da0-fe44a394ebe8",
+      "name": "Build Score Prompt",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2060,
+        220
+      ],
+      "parameters": {
+        "jsCode": "\nconst fs = require('fs');\nlet signals = [];\ntry {\n  const store = JSON.parse(fs.readFileSync('/memory/email_signals.json', 'utf8'));\n  signals = store.signals || [];\n} catch(e) {}\n\nconst e = $input.first().json;\nconst sigCtx = signals.length > 0\n  ? signals.slice(-15).map(s => '- ' + s.from_email + ' \u2192 ' + s.label + ' (' + (s.last_subject||'') + ')').join('\\n')\n  : 'No signals yet.';\n\nconst prompt = `Score this email's interrupt-worthiness 1-10 for a busy professional.\n\nPast user feedback:\n${sigCtx}\n\nEmail:\nFrom: ${e.from_name} <${e.from_email}>\nSubject: ${e.subject}\nPreview: ${e.snippet || ''}\n\nRules: 9-10 = urgent/time-sensitive. 7-8 = worth reading soon. 1-6 = can wait or ignore.\nReturn JSON only: {\"score\": N, \"reason\": \"one sentence\"}`;\n\nreturn [{ json: {\n  ...e,\n  llm_body: {\n    model: 'qwen2.5:14b',\n    messages: [{ role: 'user', content: prompt }],\n    stream: false,\n    options: { temperature: 0.2 }\n  }\n}}];\n"
+      }
+    },
+    {
+      "id": "c918b0f2-b4c7-4c76-ac2b-9571e01b3ef5",
+      "name": "Score Email",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2280,
+        220
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:11434/api/chat",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.llm_body }}",
+        "options": {}
+      }
+    },
+    {
+      "id": "be37dd9f-2ec1-4075-8bd7-b936cfb56c1a",
+      "name": "Parse Score & Save Pending",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2500,
+        220
+      ],
+      "parameters": {
+        "jsCode": "\nconst fs = require('fs');\nconst emailData = $('Build Score Prompt').item.json;\nconst content = $input.first().json.message?.content || '';\n\nlet scoring = { score: 5, reason: 'could not parse' };\ntry {\n  const match = content.match(/\\{[^}]+\\}/);\n  if (match) scoring = JSON.parse(match[0]);\n} catch(e) {}\n\nconst score = Number(scoring.score) || 5;\n\n// Save to pending so callback handler has context\nif (score >= 7) {\n  const sigPath = '/memory/email_signals.json';\n  let store = { signals: [], pending: {} };\n  try { store = JSON.parse(fs.readFileSync(sigPath, 'utf8')); } catch(e) {}\n  store.pending = store.pending || {};\n  store.pending[emailData.id] = {\n    from_email: emailData.from_email,\n    from_name: emailData.from_name,\n    subject: emailData.subject,\n    score\n  };\n  // Prune pending older than 50 entries\n  const keys = Object.keys(store.pending);\n  if (keys.length > 50) delete store.pending[keys[0]];\n  fs.writeFileSync(sigPath, JSON.stringify(store, null, 2));\n}\n\nreturn [{ json: { ...emailData, score, score_reason: scoring.reason } }];\n"
+      }
+    },
+    {
+      "id": "7835ffb6-5520-4efc-bbf7-5ec85a943a56",
+      "name": "High Score?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        2720,
+        220
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "58665bbc-3611-41ed-8435-3c60dd82b84a",
+              "operator": {
+                "type": "number",
+                "operation": "gte"
+              },
+              "leftValue": "={{ $json.score }}",
+              "rightValue": 7
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "d7796531-911d-42a8-87b2-a06648649692",
+      "name": "Send Email Alert",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2940,
+        140
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.telegram.org/bot{{ $env.TELEGRAM_BOT_TOKEN }}/sendMessage",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  chat_id: $env.TELEGRAM_CHAT_ID,\n  text: '\ud83d\udce7 <b>' + $json.from_name + '</b> \\n' +\n        '<i>' + $json.subject + '</i>\\n\\n' +\n        ($json.snippet ? $json.snippet.substring(0, 200) + '\u2026' : '') +\n        '\\n\\n\ud83c\udfaf Score: ' + $json.score + '/10 \u2014 ' + $json.score_reason,\n  parse_mode: 'HTML',\n  reply_markup: JSON.stringify({\n    inline_keyboard: [[\n      { text: '\ud83d\udc4d Important', callback_data: 'email_ok::' + $json.id },\n      { text: '\ud83d\udc4e Noise',     callback_data: 'email_noise::' + $json.id }\n    ]]\n  })\n}) }}",
+        "options": {}
+      }
+    }
+  ],
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Load State",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load State": {
+      "main": [
+        [
+          {
+            "node": "Fetch Emails Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Emails Agent": {
+      "main": [
+        [
+          {
+            "node": "Parse & Split",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ollama \u2014 Email Cron": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Fetch Emails Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gmail MCP \u2014 Cron": {
+      "ai_tool": [
+        [
+          {
+            "node": "Fetch Emails Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse & Split": {
+      "main": [
+        [
+          {
+            "node": "Build Triage Body",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Triage Body": {
+      "main": [
+        [
+          {
+            "node": "Qwen Triage",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Qwen Triage": {
+      "main": [
+        [
+          {
+            "node": "Parse Triage",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Triage": {
+      "main": [
+        [
+          {
+            "node": "Skip?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Skip?": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Build Score Prompt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Score Prompt": {
+      "main": [
+        [
+          {
+            "node": "Score Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Score Email": {
+      "main": [
+        [
+          {
+            "node": "Parse Score & Save Pending",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Score & Save Pending": {
+      "main": [
+        [
+          {
+            "node": "High Score?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "High Score?": {
+      "main": [
+        [
+          {
+            "node": "Send Email Alert",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    }
+  }
+}

@@ -1,0 +1,169 @@
+services:
+
+  # ── Database for n8n ──────────────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: n8n
+      POSTGRES_USER: n8n
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U n8n"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # ── Vector store ─────────────────────────────────────────────────────────
+  qdrant:
+    image: qdrant/qdrant:v1.13.4
+    restart: unless-stopped
+    ports:
+      - "6333:6333"
+    volumes:
+      - qdrant_data:/qdrant/storage
+    environment:
+      QDRANT__LOG_LEVEL: WARN
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+
+  # ── MCP: Filesystem ──────────────────────────────────────────────────────
+  # Exposes /mnt (full data mount), /workspace, and /host-home (read-only
+  # view of the host user's home directory — dotfiles, SSH pubkeys, .config).
+  mcp-filesystem:
+    image: node:22-alpine
+    restart: unless-stopped
+    command: ["node", "/bridge/mcp-sse-bridge.mjs", "3001", "npx", "-y", "@modelcontextprotocol/server-filesystem", "/mnt", "/workspace", "/host-home"]
+    ports:
+      - "3004:3001"
+    volumes:
+      - /mnt:/mnt
+      - ${FILESYSTEM_WORKSPACE:-./workspace}:/workspace
+      - /home/billhc83:/host-home:ro
+      - ./mcp-sse-bridge.mjs:/bridge/mcp-sse-bridge.mjs:ro
+
+  # ── MCP: Playwright browser ──────────────────────────────────────────────
+  mcp-playwright:
+    image: mcr.microsoft.com/playwright:v1.50.0-jammy
+    restart: unless-stopped
+    # --allowed-hosts '*' disables the host header check added in recent versions
+    # (default now only allows the bound host, which breaks Docker service-name routing)
+    command: npx -y @playwright/mcp@latest --port 3002 --host 0.0.0.0 --allowed-hosts '*'
+    ports:
+      - "3002:3002"
+    shm_size: "1gb"
+
+  # ── MCP: Shell + Claude Code CLI (antigravity) ───────────────────────────
+  # Runs a custom MCP server that exposes:
+  #   bash        — execute shell commands (git, python3, ripgrep, docker CLI, …)
+  #   claude_code — invoke `claude -p` (print mode) against any directory on /mnt
+  # SSH keys, gitconfig, and ~/.claude config are mounted from the host so git
+  # push/pull and `claude` work out of the box.
+  mcp-shell:
+    build:
+      context: .
+      dockerfile: Dockerfile.shell
+    restart: unless-stopped
+    command: ["/bin/sh", "/server/docker-entrypoint.sh"]
+    ports:
+      - "3005:3005"
+      - "3007:3007"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3007/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    volumes:
+      - /mnt:/mnt
+      - ${FILESYSTEM_WORKSPACE:-./workspace}:/workspace
+      - /home/billhc83/.ssh:/root/.ssh:ro
+      - /home/billhc83/.gitconfig:/root/.gitconfig:ro
+      - /home/billhc83/.claude:/root/.claude
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./mcp-sse-bridge.mjs:/bridge/mcp-sse-bridge.mjs:ro
+      - ./mcp-shell-server.mjs:/server/mcp-shell-server.mjs:ro
+      - ./claude-http-server.mjs:/server/claude-http-server.mjs:ro
+      - ./docker-entrypoint.sh:/server/docker-entrypoint.sh:ro
+    environment:
+      GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  # ── MCP: GitHub ──────────────────────────────────────────────────────────
+  # Exposes GitHub API tools: search repos, read issues/PRs, create PRs,
+  # review diffs, comment, etc. Requires a GITHUB_TOKEN in .env.
+  mcp-github:
+    image: node:22-alpine
+    restart: unless-stopped
+    command: ["node", "/bridge/mcp-sse-bridge.mjs", "3006", "npx", "-y", "@modelcontextprotocol/server-github"]
+    ports:
+      - "3006:3006"
+    volumes:
+      - ./mcp-sse-bridge.mjs:/bridge/mcp-sse-bridge.mjs:ro
+    environment:
+      GITHUB_PERSONAL_ACCESS_TOKEN: ${GITHUB_TOKEN}
+
+  # ── MCP: Gmail ───────────────────────────────────────────────────────────
+  # Custom SSE bridge spawns a fresh child process per connection,
+  # avoiding supergateway's "Already connected to a transport" crash.
+  mcp-gmail:
+    image: node:22-alpine
+    restart: unless-stopped
+    command: ["node", "/bridge/mcp-sse-bridge.mjs", "3003", "npx", "-y", "@gongrzhe/server-gmail-autoauth-mcp"]
+    ports:
+      - "3003:3003"
+    volumes:
+      - ${GMAIL_CREDENTIALS_DIR:-./credentials/gmail}:/root/.gmail-mcp
+      - ./mcp-sse-bridge.mjs:/bridge/mcp-sse-bridge.mjs:ro
+
+  # ── n8n orchestrator ─────────────────────────────────────────────────────
+  n8n:
+    image: n8nio/n8n:latest
+    restart: unless-stopped
+    ports:
+      - "5678:5678"
+    environment:
+      # Database
+      DB_TYPE: postgresdb
+      DB_POSTGRESDB_HOST: postgres
+      DB_POSTGRESDB_DATABASE: n8n
+      DB_POSTGRESDB_USER: n8n
+      DB_POSTGRESDB_PASSWORD: ${POSTGRES_PASSWORD}
+      # n8n core
+      N8N_ENCRYPTION_KEY: ${N8N_ENCRYPTION_KEY}
+      WEBHOOK_URL: ${N8N_WEBHOOK_URL}
+      GENERIC_TIMEZONE: ${TIMEZONE:-Europe/London}
+      # Feature flags
+      N8N_COMMUNITY_PACKAGES_ALLOW_LISTED: "true"
+      NODE_FUNCTION_ALLOW_BUILTIN: "*"
+      NODE_FUNCTION_ALLOW_EXTERNAL: "lodash,uuid"
+      # Task runner timeout (default 300s is too short for Claude doc generation)
+      N8N_RUNNERS_TASK_TIMEOUT: "600"
+      # Passed into workflow expressions
+      OLLAMA_BASE_URL: http://host.docker.internal:11434
+      QDRANT_URL: http://qdrant:6333
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
+      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID}
+    volumes:
+      - n8n_data:/home/node/.n8n
+      - ./memory:/memory
+      - /mnt/data/projects:/projects:ro
+      - /mnt/data/Bill:/bill:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      qdrant:
+        condition: service_started
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+volumes:
+  postgres_data:
+  qdrant_data:
+  n8n_data:

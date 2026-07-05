@@ -1,0 +1,103 @@
+{
+  "name": "qwen_rag_search",
+  "nodes": [
+    {
+      "parameters": {
+        "workflowInputs": {
+          "values": [
+            { "name": "query", "type": "string" },
+            { "name": "project", "type": "string" },
+            { "name": "limit", "type": "number" }
+          ]
+        }
+      },
+      "id": "00000011-0001-4000-0000-000000000011",
+      "name": "Execute Workflow Trigger",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const input = $input.first().json;\nreturn [{ json: { model: 'qwen3-embedding:4b', prompt: input.query } }];"
+      },
+      "id": "00000011-0002-4000-0000-000000000011",
+      "name": "Build Embed Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:11434/api/embeddings",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json }}",
+        "options": { "timeout": 20000 }
+      },
+      "id": "00000011-0003-4000-0000-000000000011",
+      "name": "Embed Query",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const embedding = $input.first().json.embedding;\nconst trigger = $('Execute Workflow Trigger').first().json;\nconst limit = Number(trigger.limit) || 5;\nconst project = (trigger.project || '').trim();\n\nconst body = {\n  vector: embedding,\n  limit: limit,\n  with_payload: true,\n  score_threshold: 0.5\n};\n\nif (project) {\n  body.filter = {\n    must: [{ key: 'metadata.project', match: { value: project } }]\n  };\n}\n\nreturn [{ json: body }];"
+      },
+      "id": "00000011-0004-4000-0000-000000000011",
+      "name": "Build Search",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [900, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://qdrant:6333/collections/project_rag/points/search",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json }}",
+        "options": { "timeout": 10000, "response": { "response": { "responseFormat": "json" } } }
+      },
+      "id": "00000011-0005-4000-0000-000000000011",
+      "name": "Search Qdrant",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1120, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const results = $input.first().json.result || [];\nconst trigger = $('Execute Workflow Trigger').first().json;\n\nif (results.length === 0) {\n  return [{ json: { output: `No relevant results found in project files for: \"${trigger.query}\"` } }];\n}\n\nconst formatted = results.map((r, i) => {\n  const m = r.payload?.metadata || {};\n  const content = r.payload?.content || '';\n  const lines = m.loc?.lines ? ` lines ${m.loc.lines.from}–${m.loc.lines.to}` : '';\n  const score = (r.score * 100).toFixed(0);\n  const summary = m.summary ? `// ${m.summary}\\n` : '';\n  return `[${i + 1}] ${m.filepath}${lines} (score: ${score}%)\\n\\`\\`\\`${m.filetype || ''}\\n${summary}${content}\\n\\`\\`\\``;\n}).join('\\n\\n');\n\nreturn [{ json: { output: `Project RAG search: \"${trigger.query}\" — ${results.length} result(s)\\n\\n${formatted}` } }];"
+      },
+      "id": "00000011-0006-4000-0000-000000000011",
+      "name": "Format Results",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1340, 300]
+    }
+  ],
+  "connections": {
+    "Execute Workflow Trigger": {
+      "main": [[{ "node": "Build Embed Request", "type": "main", "index": 0 }]]
+    },
+    "Build Embed Request": {
+      "main": [[{ "node": "Embed Query", "type": "main", "index": 0 }]]
+    },
+    "Embed Query": {
+      "main": [[{ "node": "Build Search", "type": "main", "index": 0 }]]
+    },
+    "Build Search": {
+      "main": [[{ "node": "Search Qdrant", "type": "main", "index": 0 }]]
+    },
+    "Search Qdrant": {
+      "main": [[{ "node": "Format Results", "type": "main", "index": 0 }]]
+    }
+  },
+  "active": true,
+  "settings": { "executionOrder": "v1" },
+  "meta": { "templateCredsSetupCompleted": true },
+  "tags": [{ "name": "rag" }, { "name": "search" }, { "name": "local-model" }],
+  "id": "00000011-0000-4000-0000-000000000011"
+}

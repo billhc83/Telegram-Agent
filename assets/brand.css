@@ -1,0 +1,228 @@
+/* =========================================================
+   Brand stylesheet — telegram-agent document system
+   One theme, all document types. Link this from every HTML doc.
+   ========================================================= */
+
+/* ── Reset & base ────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --c-bg:         #f8f9fb;
+  --c-surface:    #ffffff;
+  --c-border:     #e2e6ed;
+  --c-text:       #1a1d23;
+  --c-muted:      #6b7280;
+  --c-accent:     #2563eb;
+  --c-accent-lt:  #eff4ff;
+  --c-heading:    #111827;
+  --c-success:    #059669;
+  --c-warn:       #d97706;
+  --c-danger:     #dc2626;
+
+  --font-sans:    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono:    "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+
+  --radius:       6px;
+  --shadow-sm:    0 1px 3px rgba(0,0,0,.08), 0 1px 2px rgba(0,0,0,.05);
+  --shadow-md:    0 4px 12px rgba(0,0,0,.08), 0 2px 4px rgba(0,0,0,.05);
+
+  font-size: 15px;
+  line-height: 1.6;
+}
+
+html { background: var(--c-bg); color: var(--c-text); font-family: var(--font-sans); }
+
+body {
+  max-width: 820px;
+  margin: 0 auto;
+  padding: 2rem 1.5rem 4rem;
+}
+
+/* ── Typography ──────────────────────────────────────────── */
+h1, h2, h3, h4 {
+  color: var(--c-heading);
+  line-height: 1.25;
+  font-weight: 600;
+}
+
+h1 { font-size: 1.75rem; margin-bottom: .25rem; }
+h2 { font-size: 1.2rem;  margin: 2rem 0 .75rem; padding-bottom: .4rem; border-bottom: 2px solid var(--c-border); }
+h3 { font-size: 1rem;    margin: 1.5rem 0 .5rem; color: var(--c-accent); }
+h4 { font-size: .9rem;   margin: 1rem 0 .4rem;  text-transform: uppercase; letter-spacing: .05em; color: var(--c-muted); }
+
+p  { margin-bottom: .85rem; }
+small, .muted { color: var(--c-muted); font-size: .85rem; }
+
+a  { color: var(--c-accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+/* ── Document header ─────────────────────────────────────── */
+.doc-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 2rem;
+  padding-bottom: 1.25rem;
+  border-bottom: 3px solid var(--c-accent);
+}
+
+.doc-header .branding {
+  display: flex;
+  align-items: center;
+  gap: .6rem;
+  font-size: .8rem;
+  color: var(--c-muted);
+  font-weight: 500;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+
+.doc-header .branding::before {
+  content: "";
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--c-accent);
+}
+
+.doc-meta {
+  text-align: right;
+  font-size: .8rem;
+  color: var(--c-muted);
+  line-height: 1.5;
+}
+
+/* ── Card / surface ──────────────────────────────────────── */
+.card {
+  background: var(--c-surface);
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
+  padding: 1.25rem 1.5rem;
+  margin-bottom: 1.25rem;
+}
+
+.card + .card { margin-top: 0; }
+
+/* ── Tables ──────────────────────────────────────────────── */
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1rem 0;
+  font-size: .9rem;
+  background: var(--c-surface);
+  border-radius: var(--radius);
+  overflow: hidden;
+  box-shadow: var(--shadow-sm);
+}
+
+thead th {
+  background: var(--c-heading);
+  color: #fff;
+  font-weight: 600;
+  text-align: left;
+  padding: .65rem 1rem;
+  font-size: .8rem;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+}
+
+tbody td {
+  padding: .65rem 1rem;
+  border-bottom: 1px solid var(--c-border);
+  vertical-align: top;
+}
+
+tbody tr:last-child td { border-bottom: none; }
+tbody tr:nth-child(even) td { background: #fafbfd; }
+
+td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+td.total { font-weight: 700; }
+
+/* ── Key-value pairs ─────────────────────────────────────── */
+.kv-grid {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: .35rem 1.5rem;
+  font-size: .9rem;
+}
+
+.kv-grid dt { color: var(--c-muted); font-weight: 500; white-space: nowrap; }
+.kv-grid dd { color: var(--c-text); }
+
+/* ── Lists ───────────────────────────────────────────────── */
+ul, ol {
+  padding-left: 1.4rem;
+  margin-bottom: 1rem;
+}
+
+ul li, ol li { margin-bottom: .35rem; }
+
+.checklist { list-style: none; padding: 0; }
+.checklist li { display: flex; gap: .6rem; padding: .4rem 0; border-bottom: 1px solid var(--c-border); align-items: flex-start; }
+.checklist li:last-child { border-bottom: none; }
+.checklist li::before { content: "○"; color: var(--c-muted); flex-shrink: 0; margin-top: .05rem; }
+.checklist li.done::before { content: "✓"; color: var(--c-success); }
+
+/* ── Badges / status ─────────────────────────────────────── */
+.badge {
+  display: inline-block;
+  padding: .15rem .5rem;
+  border-radius: 100px;
+  font-size: .75rem;
+  font-weight: 600;
+  letter-spacing: .03em;
+}
+
+.badge-blue  { background: var(--c-accent-lt); color: var(--c-accent); }
+.badge-green { background: #ecfdf5; color: var(--c-success); }
+.badge-warn  { background: #fffbeb; color: var(--c-warn); }
+.badge-red   { background: #fef2f2; color: var(--c-danger); }
+
+/* ── Callout / highlight box ─────────────────────────────── */
+.callout {
+  padding: .85rem 1.1rem;
+  border-radius: var(--radius);
+  border-left: 4px solid var(--c-accent);
+  background: var(--c-accent-lt);
+  margin: 1rem 0;
+  font-size: .9rem;
+}
+
+.callout.warn  { border-color: var(--c-warn);  background: #fffbeb; }
+.callout.good  { border-color: var(--c-success); background: #ecfdf5; }
+
+/* ── Summary / totals row ────────────────────────────────── */
+.totals-row {
+  display: flex;
+  justify-content: flex-end;
+  gap: 3rem;
+  padding: .85rem 1rem;
+  background: var(--c-heading);
+  color: #fff;
+  border-radius: var(--radius);
+  margin-top: .5rem;
+  font-size: .9rem;
+}
+
+.totals-row .label { color: rgba(255,255,255,.7); }
+.totals-row .amount { font-weight: 700; font-size: 1.05rem; font-variant-numeric: tabular-nums; }
+
+/* ── Footer ──────────────────────────────────────────────── */
+.doc-footer {
+  margin-top: 3rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--c-border);
+  font-size: .78rem;
+  color: var(--c-muted);
+  display: flex;
+  justify-content: space-between;
+}
+
+/* ── Print ───────────────────────────────────────────────── */
+@media print {
+  body { max-width: none; padding: 1cm; }
+  .card { box-shadow: none; }
+  a { color: inherit; }
+}

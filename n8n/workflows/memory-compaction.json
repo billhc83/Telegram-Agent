@@ -1,0 +1,317 @@
+{
+  "name": "Weekly Memory Compaction",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 3 * * 0"
+            }
+          ]
+        }
+      },
+      "id": "comp-0001-aaaa-bbbb-cccc-ddddeeeeffffgg",
+      "name": "Every Sunday 3am",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        240,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://qdrant:6333/collections/agent_memory/points/scroll",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "limit",
+              "value": "500"
+            },
+            {
+              "name": "with_payload",
+              "value": "true"
+            },
+            {
+              "name": "with_vector",
+              "value": "false"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "comp-0002-aaaa-bbbb-cccc-ddddeeeeffffgg",
+      "name": "Fetch Recent Points",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        460,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const points = $input.item.json.result?.points ?? [];\nconst texts = points.map(p => {\n  try {\n    const c = JSON.parse(p.payload?.content ?? '{}');\n    return c.text ?? '';\n  } catch {\n    return p.payload?.text ?? '';\n  }\n}).filter(Boolean);\nreturn { json: { conversation_dump: texts.join('\\n---\\n'), point_ids: points.map(p => p.id) } };"
+      },
+      "id": "comp-0003-aaaa-bbbb-cccc-ddddeeeeffffgg",
+      "name": "Flatten Texts",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        680,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Below are recent conversation snippets from a Telegram AI assistant. Condense them into a compact summary that preserves: (1) user preferences and recurring topics, (2) ongoing projects or tasks, (3) any facts the user explicitly stated about themselves. Be brief. Remove duplicate or trivial exchanges.\n\n---\n{{ $json.conversation_dump }}",
+        "options": {
+          "systemMessage": "You are a memory compaction assistant. Output only the condensed summary \u2014 no preamble."
+        }
+      },
+      "id": "comp-0004-aaaa-bbbb-cccc-ddddeeeeffffgg",
+      "name": "Summarize with Ollama",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.7,
+      "position": [
+        900,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "model": "qwen3-14b-nothink:latest",
+        "options": {
+          "temperature": 0.3,
+          "numCtx": 16384
+        }
+      },
+      "id": "comp-0005-aaaa-bbbb-cccc-ddddeeeeffffgg",
+      "name": "Ollama \u2014 Compaction",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOllama",
+      "typeVersion": 1.1,
+      "position": [
+        900,
+        160
+      ],
+      "credentials": {
+        "ollamaApi": {
+          "id": "Qs8Dh8bkuU19W10U",
+          "name": "Ollama account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://qdrant:6333/collections/agent_memory/points/delete",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ points: $('Flatten Texts').item.json.point_ids }) }}",
+        "options": {}
+      },
+      "id": "comp-0006-aaaa-bbbb-cccc-ddddeeeeffffgg",
+      "name": "Delete Old Points",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1120,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "options": {},
+        "mode": "insert",
+        "qdrantCollection": {
+          "__rl": true,
+          "value": "agent_memory",
+          "mode": "id"
+        }
+      },
+      "id": "comp-0007-aaaa-bbbb-cccc-ddddeeeeffffgg",
+      "name": "Insert Summary",
+      "type": "@n8n/n8n-nodes-langchain.vectorStoreQdrant",
+      "typeVersion": 1.1,
+      "position": [
+        1340,
+        300
+      ],
+      "credentials": {
+        "qdrantApi": {
+          "id": "aWAok1h2HHdNtmht",
+          "name": "Qdrant account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "model": "nomic-embed-text:latest",
+        "options": {}
+      },
+      "id": "comp-0008-aaaa-bbbb-cccc-ddddeeeeffffgg",
+      "name": "Embeddings \u2014 Compaction",
+      "type": "@n8n/n8n-nodes-langchain.embeddingsOllama",
+      "typeVersion": 1.1,
+      "position": [
+        1340,
+        160
+      ],
+      "credentials": {
+        "ollamaApi": {
+          "id": "Qs8Dh8bkuU19W10U",
+          "name": "Ollama account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "dataType": "json",
+        "jsonMode": "expressionData",
+        "jsonData": "={{ JSON.stringify({ text: 'WEEKLY SUMMARY:\\n' + $('Summarize with Ollama').item.json.output, source: 'compaction', timestamp: $now.toISO() }) }}"
+      },
+      "id": "1ab8223e-6813-4546-a711-3e858cfb06ac",
+      "name": "Document Loader \u2014 Summary",
+      "type": "@n8n/n8n-nodes-langchain.documentDefaultDataLoader",
+      "typeVersion": 1,
+      "position": [
+        1340,
+        480
+      ]
+    },
+    {
+      "parameters": {
+        "chunkSize": 1000,
+        "chunkOverlap": 100,
+        "options": {}
+      },
+      "id": "0c427926-c61b-4378-b927-56e357ffbde4",
+      "name": "Text Splitter \u2014 Summary",
+      "type": "@n8n/n8n-nodes-langchain.textSplitterRecursiveCharacterTextSplitter",
+      "typeVersion": 1,
+      "position": [
+        1340,
+        580
+      ]
+    }
+  ],
+  "connections": {
+    "Every Sunday 3am": {
+      "main": [
+        [
+          {
+            "node": "Fetch Recent Points",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Recent Points": {
+      "main": [
+        [
+          {
+            "node": "Flatten Texts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Flatten Texts": {
+      "main": [
+        [
+          {
+            "node": "Summarize with Ollama",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Summarize with Ollama": {
+      "main": [
+        [
+          {
+            "node": "Delete Old Points",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Delete Old Points": {
+      "main": [
+        [
+          {
+            "node": "Insert Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ollama \u2014 Compaction": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Summarize with Ollama",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Embeddings \u2014 Compaction": {
+      "ai_embedding": [
+        [
+          {
+            "node": "Insert Summary",
+            "type": "ai_embedding",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Document Loader \u2014 Summary": {
+      "ai_document": [
+        [
+          {
+            "node": "Insert Summary",
+            "type": "ai_document",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Text Splitter \u2014 Summary": {
+      "ai_textSplitter": [
+        [
+          {
+            "node": "Document Loader \u2014 Summary",
+            "type": "ai_textSplitter",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": [
+    {
+      "name": "memory"
+    },
+    {
+      "name": "maintenance"
+    }
+  ],
+  "id": "256dff6e-718f-4b3d-900a-dd3782ebee42"
+}

@@ -1,0 +1,60 @@
+{
+  "name": "Project RAG \u2014 Structure Manifest",
+  "nodes": [
+    {
+      "parameters": {
+        "path": "rag-build-structure",
+        "options": {},
+        "httpMethod": "POST"
+      },
+      "id": "ragd0001-0000-4000-0000-000000000001",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        240,
+        400
+      ],
+      "webhookId": "rag-build-structure"
+    },
+    {
+      "parameters": {
+        "jsCode": "const fs = require('fs');\nconst path = require('path');\n\nconst ROOT = '/projects';\nconst HOST_ROOT = '/mnt/data/projects';\nconst OUTPUT_FILE = '/memory/project_structure.json';\n\nconst SKIP_DIRS = new Set(['.git', 'node_modules', 'venv', '.venv', '__pycache__', '.pytest_cache', 'dist', 'build', '.next', 'tmp', 'tmp_staging', 'credentials', 'site-packages', 'dist-packages', '.tox', '.mypy_cache', '.ruff_cache', '.eggs']);\nconst SKIP_DIR_SUFFIXES = ['.egg-info'];\nconst ALLOWED_EXT = new Set(['.py', '.js', '.jsx', '.ts', '.tsx', '.mjs', '.md', '.mdx', '.txt', '.json', '.yml', '.yaml', '.sh', '.toml', '.cfg', '.ini', '.html', '.css', '.scss', '.sql', '.lark', '.rst']);\nconst SKIP_FILE_NAMES = new Set(['package-lock.json', 'poetry.lock', 'uv.lock']);\n\nfunction isSecret(name) {\n  if (name === '.env.example') return false;\n  if (name === '.env' || name.startsWith('.env.')) return true;\n  if (name.endsWith('.pem') || name.endsWith('.key')) return true;\n  if (name.startsWith('id_rsa')) return true;\n  return false;\n}\n\nfunction isVenvRoot(dir) {\n  try { return fs.existsSync(path.join(dir, 'pyvenv.cfg')); } catch (e) { return false; }\n}\n\nfunction buildTree(dir, hostDir, depth) {\n  if (depth > 6) return null;\n  let entries;\n  try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch (e) { return null; }\n\n  const node = {\n    path: hostDir,\n    directories: {},\n    files: [],\n    languages: {},\n    file_count: 0\n  };\n\n  for (const entry of entries) {\n    const full = path.join(dir, entry.name);\n    const hostFull = path.join(hostDir, entry.name);\n    if (entry.isDirectory()) {\n      if (SKIP_DIRS.has(entry.name)) continue;\n      if (SKIP_DIR_SUFFIXES.some(function(s) { return entry.name.endsWith(s); })) continue;\n      if (isVenvRoot(full)) continue;\n      const child = buildTree(full, hostFull, depth + 1);\n      if (child) {\n        node.directories[entry.name] = child;\n        node.file_count += child.file_count;\n        for (const [lang, count] of Object.entries(child.languages)) {\n          node.languages[lang] = (node.languages[lang] || 0) + count;\n        }\n      }\n    } else if (entry.isFile()) {\n      const ext = path.extname(entry.name).toLowerCase();\n      if (!ALLOWED_EXT.has(ext)) continue;\n      if (SKIP_FILE_NAMES.has(entry.name)) continue;\n      if (isSecret(entry.name)) continue;\n      const lang = ext.slice(1) || 'unknown';\n      node.files.push(entry.name);\n      node.file_count++;\n      node.languages[lang] = (node.languages[lang] || 0) + 1;\n    }\n  }\n\n  return node;\n}\n\nlet projectEntries;\ntry { projectEntries = fs.readdirSync(ROOT, { withFileTypes: true }); } catch (e) {\n  return [{ json: { status: 'error', message: String(e) } }];\n}\n\nconst structure = { generated_at: new Date().toISOString(), projects: {} };\n\nfor (const entry of projectEntries) {\n  if (!entry.isDirectory()) continue;\n  if (SKIP_DIRS.has(entry.name)) continue;\n  const full = path.join(ROOT, entry.name);\n  const hostFull = path.join(HOST_ROOT, entry.name);\n  const tree = buildTree(full, hostFull, 1);\n  if (tree) {\n    structure.projects[entry.name] = {\n      name: entry.name,\n      host_path: hostFull,\n      file_count: tree.file_count,\n      languages: tree.languages,\n      top_level_dirs: Object.keys(tree.directories),\n      top_level_files: tree.files,\n      tree: tree\n    };\n  }\n}\n\nfs.writeFileSync(OUTPUT_FILE, JSON.stringify(structure, null, 2));\n\nreturn [{ json: {\n  status: 'ok',\n  projects: Object.keys(structure.projects),\n  generated_at: structure.generated_at\n} }];"
+      },
+      "id": "ragd0002-0000-4000-0000-000000000002",
+      "name": "Build Structure Manifest",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        460,
+        400
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Build Structure Manifest",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": [
+    {
+      "name": "rag"
+    },
+    {
+      "name": "maintenance"
+    }
+  ],
+  "id": "ragd3333-0000-4000-0000-000000000001"
+}

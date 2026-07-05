@@ -1,0 +1,305 @@
+{
+  "name": "Project RAG Indexer",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "*/5 * * * *"
+            }
+          ]
+        }
+      },
+      "id": "rag00001-0000-4000-0000-000000000001",
+      "name": "Every 15 Minutes",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [240, 400]
+    },
+    {
+      "parameters": {
+        "jsCode": "const fs = require('fs');\nconst path = require('path');\nconst crypto = require('crypto');\n\nconst ROOT = '/projects';\nconst HOST_ROOT = '/mnt/data/projects';\nconst STATE_FILE = '/memory/project_rag_state.json';\n\nconst SKIP_DIRS = new Set(['.git', 'node_modules', 'venv', '.venv', '__pycache__', '.pytest_cache', 'dist', 'build', '.next', 'tmp', 'tmp_staging', 'credentials', 'site-packages', 'dist-packages', '.tox', '.mypy_cache', '.ruff_cache', '.eggs', 'memory']);\nconst SKIP_DIR_SUFFIXES = ['.egg-info'];\nconst ALLOWED_EXT = new Set(['.py', '.js', '.jsx', '.ts', '.tsx', '.mjs', '.md', '.mdx', '.txt', '.json', '.yml', '.yaml', '.sh', '.toml', '.cfg', '.ini', '.html', '.css', '.scss', '.sql', '.lark', '.rst']);\nconst SKIP_FILE_NAMES = new Set(['package-lock.json', 'poetry.lock', 'uv.lock']);\n\nfunction isSecret(name) {\n  if (name === '.env.example') return false;\n  if (name === '.env' || name.startsWith('.env.')) return true;\n  if (name.endsWith('.pem') || name.endsWith('.key')) return true;\n  if (name.startsWith('id_rsa')) return true;\n  return false;\n}\n\nfunction isVenvRoot(dir) {\n  try { return fs.existsSync(path.join(dir, 'pyvenv.cfg')); } catch (e) { return false; }\n}\n\nfunction walk(dir, acc) {\n  let entries;\n  try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch (e) { return; }\n  for (const entry of entries) {\n    const full = path.join(dir, entry.name);\n    if (entry.isDirectory()) {\n      if (SKIP_DIRS.has(entry.name)) continue;\n      if (SKIP_DIR_SUFFIXES.some(function (suf) { return entry.name.endsWith(suf); })) continue;\n      if (isVenvRoot(full)) continue;\n      walk(full, acc);\n    } else if (entry.isFile()) {\n      const ext = path.extname(entry.name).toLowerCase();\n      if (!ALLOWED_EXT.has(ext)) continue;\n      if (SKIP_FILE_NAMES.has(entry.name)) continue;\n      if (isSecret(entry.name)) continue;\n      let stat;\n      try { stat = fs.statSync(full); } catch (e) { continue; }\n      acc.push({ full: full, stat: stat });\n    }\n  }\n}\n\nconst files = [];\nwalk(ROOT, files);\n\n// Load state — handle old format {rel: {hash, mtime}} and new format {files:{...}, dirty_dirs:[...], dirty_projects:[], structure_changed:bool}\nlet state;\ntry {\n  const raw = JSON.parse(fs.readFileSync(STATE_FILE, 'utf8'));\n  if (raw.files !== undefined) {\n    state = raw;\n  } else {\n    state = { files: raw, dirty_dirs: [], dirty_projects: [], structure_changed: false };\n  }\n} catch (e) {\n  state = { files: {}, dirty_dirs: [], dirty_projects: [], structure_changed: false };\n}\n\nconst manifest = state.files || {};\nconst MAX_NEW_OR_CHANGED_PER_RUN = 15;\n\nconst seen = new Set();\nconst newOrChanged = [];\nconst dirtyDirs = new Set(state.dirty_dirs || []);\nconst dirtyProjects = new Set(state.dirty_projects || []);\nlet structureChanged = state.structure_changed || false;\n\nfor (const f of files) {\n  const full = f.full;\n  const stat = f.stat;\n  let content;\n  try { content = fs.readFileSync(full, 'utf8'); } catch (e) { continue; }\n  if (content.slice(0, 1024).indexOf('\\u0000') !== -1) continue;\n  if (content.trim().length === 0) continue;\n\n  const rel = path.relative(ROOT, full);\n  const hostPath = path.join(HOST_ROOT, rel);\n  const relParts = rel.split(path.sep);\n  const project = relParts[0];\n  const filename = path.basename(full);\n  const filetype = path.extname(full).slice(1).toLowerCase();\n  const hash = crypto.createHash('sha256').update(content).digest('hex');\n  const mtime = stat.mtime.toISOString();\n\n  seen.add(rel);\n\n  const prior = manifest[rel];\n  const priorHash = prior ? (prior.content_hash || prior.hash) : null;\n  if (priorHash && priorHash === hash) continue;\n\n  // Mark all ancestor directories dirty (deepest propagates upward)\n  for (let i = 1; i < relParts.length; i++) {\n    dirtyDirs.add(relParts.slice(0, i).join('/'));\n  }\n  dirtyProjects.add(project);\n  if (!prior) structureChanged = true;\n\n  const hierarchyId = relParts.join('/');\n  const parentId = relParts.length > 2\n    ? relParts.slice(0, -1).join('/')\n    : project;\n\n  newOrChanged.push({\n    json: {\n      status: prior ? 'changed' : 'new',\n      rel: rel,\n      filepath: hostPath,\n      filename: filename,\n      filetype: filetype,\n      project: project,\n      mtime: mtime,\n      content_hash: hash,\n      content: content,\n      hierarchy_id: hierarchyId,\n      parent_id: parentId,\n    },\n  });\n}\n\nconst output = newOrChanged.slice(0, MAX_NEW_OR_CHANGED_PER_RUN);\n\nfor (const rel of Object.keys(manifest)) {\n  if (!seen.has(rel)) {\n    const relParts = rel.split(path.sep);\n    for (let i = 1; i < relParts.length; i++) {\n      dirtyDirs.add(relParts.slice(0, i).join('/'));\n    }\n    dirtyProjects.add(relParts[0]);\n    structureChanged = true;\n    output.push({\n      json: {\n        status: 'deleted',\n        rel: rel,\n        filepath: path.join(HOST_ROOT, rel),\n        project: relParts[0],\n      },\n    });\n  }\n}\n\n// Write updated dirty state before per-item processing begins\nstate.dirty_dirs = Array.from(dirtyDirs);\nstate.dirty_projects = Array.from(dirtyProjects);\nstate.structure_changed = structureChanged;\nfs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 2));\n\nreturn output;"
+      },
+      "id": "rag00002-0000-4000-0000-000000000002",
+      "name": "Walk & Diff",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [460, 400]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "version": 2, "leftValue": "", "caseSensitive": false, "typeValidation": "loose" },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "cond-deleted",
+              "operator": { "type": "boolean", "operation": "true", "singleValue": true },
+              "leftValue": "={{ $json.status === 'deleted' }}"
+            }
+          ]
+        }
+      },
+      "id": "rag00003-0000-4000-0000-000000000003",
+      "name": "Is Deleted?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [680, 400]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://qdrant:6333/collections/project_rag/points/delete",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ filter: { must: [{ key: 'metadata.filepath', match: { value: $json.filepath } }] } }) }}",
+        "options": {}
+      },
+      "id": "rag00004-0000-4000-0000-000000000004",
+      "name": "Delete Old Chunks (Deleted)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [920, 260]
+    },
+    {
+      "parameters": {
+        "jsCode": "const fs = require('fs');\nconst STATE_FILE = '/memory/project_rag_state.json';\nconst rel = $('Walk & Diff').item.json.rel;\n\nlet state;\ntry {\n  const raw = JSON.parse(fs.readFileSync(STATE_FILE, 'utf8'));\n  state = raw.files !== undefined ? raw : { files: raw, dirty_dirs: [], dirty_projects: [], structure_changed: false };\n} catch (e) {\n  state = { files: {}, dirty_dirs: [], dirty_projects: [], structure_changed: false };\n}\n\ndelete state.files[rel];\nstate.structure_changed = true;\nfs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 2));\n\nreturn { json: { rel: rel, status: 'removed' } };",
+        "mode": "runOnceForEachItem"
+      },
+      "id": "rag00005-0000-4000-0000-000000000005",
+      "name": "Remove From Manifest",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1140, 260]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://qdrant:6333/collections/project_rag/points/delete",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ filter: { must: [{ key: 'metadata.filepath', match: { value: $('Walk & Diff').item.json.filepath } }] } }) }}",
+        "options": {}
+      },
+      "id": "rag00006-0000-4000-0000-000000000006",
+      "name": "Delete Old Chunks (Pre-Insert)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2060, 540]
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.item.json;\nconst content = item.content || '';\nconst truncated = content.length > 2000 ? content.slice(0, 2000) : content;\nconst sys = 'You tag project files for a semantic search index. Given a filename and its content, respond with STRICT JSON only (no markdown fences, no commentary): {\"chunk_type\": \"<short label: overview|source_code|config|test|documentation|data|script>\", \"topics\": [\"<3-8 short keywords>\"], \"summary\": \"<one sentence describing what this file does>\", \"purpose\": \"<short phrase: what this file is for>\", \"responsibilities\": [\"<verb phrase describing what this file does>\"], \"dependencies\": [\"<library, module, or service this file uses>\"], \"public_apis\": [\"<exported function/class/constant name>\"]}';\nconst user = 'Project: ' + item.project + '\\nFile: ' + item.filename + ' (.' + item.filetype + ')\\n\\n' + truncated;\nreturn {\n  json: {\n    model: 'qwen2.5-coder:14b',\n    messages: [\n      { role: 'system', content: sys },\n      { role: 'user', content: user },\n    ],\n    stream: false,\n    options: { temperature: 0.1, num_predict: 400 },\n  },\n};",
+        "mode": "runOnceForEachItem"
+      },
+      "id": "rag00007-0000-4000-0000-000000000007",
+      "name": "Build Tag Prompt",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1140, 540]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:11434/api/chat",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json }}",
+        "options": {
+          "timeout": 120000,
+          "batching": { "batch": { "batchSize": 1, "batchInterval": 250 } }
+        }
+      },
+      "id": "rag00008-0000-4000-0000-000000000008",
+      "name": "Ollama Tag Chat",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1360, 540],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 2000,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.item.json;\nconst requestFailed = !item.message;\nconst raw = (item.message && item.message.content) || '';\nlet parsed = {};\nif (!requestFailed) {\n  try {\n    const cleaned = raw.replace(/```json|```/g, '').trim();\n    parsed = JSON.parse(cleaned);\n  } catch (e) {\n    parsed = {};\n  }\n}\nconst tagFailed = requestFailed || typeof parsed.chunk_type !== 'string';\nif (tagFailed) {\n  const fs = require('fs');\n  const filepath = $('Walk & Diff').item.json.filepath;\n  const reason = requestFailed ? 'ollama_request_failed' : 'unparseable_response';\n  const line = new Date().toISOString() + '\\t' + reason + '\\t' + filepath + '\\n';\n  try { fs.appendFileSync('/memory/project_rag_failures.log', line); } catch (e) {}\n}\nreturn {\n  json: {\n    chunk_type: typeof parsed.chunk_type === 'string' ? parsed.chunk_type : 'unknown',\n    topics: Array.isArray(parsed.topics) ? parsed.topics.filter(function (t) { return typeof t === 'string'; }) : [],\n    summary: typeof parsed.summary === 'string' ? parsed.summary : '',\n    purpose: typeof parsed.purpose === 'string' ? parsed.purpose : '',\n    responsibilities: Array.isArray(parsed.responsibilities) ? parsed.responsibilities : [],\n    dependencies: Array.isArray(parsed.dependencies) ? parsed.dependencies : [],\n    public_apis: Array.isArray(parsed.public_apis) ? parsed.public_apis : [],\n    tag_failed: tagFailed,\n  },\n};",
+        "mode": "runOnceForEachItem"
+      },
+      "id": "rag00009-0000-4000-0000-000000000009",
+      "name": "Parse Tags",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1580, 540]
+    },
+    {
+      "parameters": {
+        "jsCode": "const crypto = require('crypto');\nconst http = require('http');\n\nfunction uuidv5(name) {\n  const nsHex = '6ba7b8109dad11d180b400c04fd430c8';\n  const nsBuf = Buffer.from(nsHex, 'hex');\n  const nameBuf = Buffer.from(name, 'utf8');\n  const hash = crypto.createHash('sha1').update(Buffer.concat([nsBuf, nameBuf])).digest();\n  hash[6] = (hash[6] & 0x0f) | 0x50;\n  hash[8] = (hash[8] & 0x3f) | 0x80;\n  const h = hash.slice(0, 16).toString('hex');\n  return h.slice(0,8) + '-' + h.slice(8,12) + '-' + h.slice(12,16) + '-' + h.slice(16,20) + '-' + h.slice(20,32);\n}\n\nfunction httpCall(method, host, port, urlPath, body) {\n  return new Promise(function(resolve, reject) {\n    const data = JSON.stringify(body);\n    const req = http.request(\n      { host: host, port: port, path: urlPath, method: method, headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(data) } },\n      function(res) {\n        let buf = '';\n        res.on('data', function(c) { buf += c; });\n        res.on('end', function() { try { resolve(JSON.parse(buf)); } catch(e) { resolve({}); } });\n      }\n    );\n    req.on('error', reject);\n    req.write(data);\n    req.end();\n  });\n}\n\nconst tagItem = $('Parse Tags').item.json;\nconst walkItem = $('Walk & Diff').item.json;\n\nif (tagItem.tag_failed) {\n  return { json: { file_summary_status: 'skipped_tag_failed', hierarchy_id: walkItem.hierarchy_id } };\n}\n\nconst hierarchyId = walkItem.hierarchy_id;\nconst parentId = walkItem.parent_id;\nconst project = walkItem.project;\n\nconst embedText = [\n  'File: ' + walkItem.filename,\n  'Purpose: ' + (tagItem.purpose || tagItem.summary || ''),\n  tagItem.responsibilities.length ? 'Responsibilities: ' + tagItem.responsibilities.join(', ') : '',\n  tagItem.dependencies.length ? 'Dependencies: ' + tagItem.dependencies.join(', ') : '',\n  tagItem.topics.length ? 'Topics: ' + tagItem.topics.join(', ') : '',\n].filter(Boolean).join('\\n');\n\nconst contentText = [\n  'Purpose: ' + (tagItem.purpose || tagItem.summary || ''),\n  tagItem.responsibilities.length ? 'Responsibilities: ' + tagItem.responsibilities.join(', ') : '',\n  tagItem.dependencies.length ? 'Dependencies: ' + tagItem.dependencies.join(', ') : '',\n  tagItem.public_apis.length ? 'Public APIs: ' + tagItem.public_apis.join(', ') : '',\n  'Topics: ' + tagItem.topics.join(', '),\n].filter(Boolean).join('\\n');\n\nlet vector;\ntry {\n  const embedRes = await httpCall('POST', 'host.docker.internal', 11434, '/api/embed', {\n    model: 'qwen3-embedding:4b', input: embedText\n  });\n  vector = (embedRes.embeddings || [[]])[0];\n} catch (e) {\n  return { json: { file_summary_status: 'embed_failed', hierarchy_id: hierarchyId, error: String(e) } };\n}\n\nif (!vector || !vector.length) {\n  return { json: { file_summary_status: 'embed_empty', hierarchy_id: hierarchyId } };\n}\n\nconst pointId = uuidv5('file:' + hierarchyId);\ntry {\n  await httpCall('PUT', 'qdrant', 6333, '/collections/project_rag/points?wait=false', {\n    points: [{\n      id: pointId,\n      vector: vector,\n      payload: {\n        content: contentText,\n        metadata: {\n          hierarchy_id: hierarchyId,\n          level: 'file',\n          parent_id: parentId,\n          project: project,\n          filepath: walkItem.filepath,\n          filename: walkItem.filename,\n          filetype: walkItem.filetype,\n          summary: tagItem.summary,\n          purpose: tagItem.purpose,\n          responsibilities: tagItem.responsibilities,\n          dependencies: tagItem.dependencies,\n          public_apis: tagItem.public_apis,\n          topics: tagItem.topics,\n          chunk_type: tagItem.chunk_type,\n          content_hash: walkItem.content_hash,\n          updated_at: new Date().toISOString()\n        }\n      }\n    }]\n  });\n} catch (e) {\n  return { json: { file_summary_status: 'upsert_failed', hierarchy_id: hierarchyId, error: String(e) } };\n}\n\nreturn { json: { file_summary_status: 'ok', hierarchy_id: hierarchyId, point_id: pointId } };",
+        "mode": "runOnceForEachItem"
+      },
+      "id": "rag00017-0000-4000-0000-000000000017",
+      "name": "Upsert File Summary",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2500, 380],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "mode": "insert",
+        "options": {},
+        "qdrantCollection": {
+          "__rl": true,
+          "mode": "id",
+          "value": "project_rag"
+        }
+      },
+      "id": "rag00010-0000-4000-0000-000000000010",
+      "name": "Vector Store — Project RAG",
+      "type": "@n8n/n8n-nodes-langchain.vectorStoreQdrant",
+      "typeVersion": 1.1,
+      "position": [2280, 540],
+      "credentials": {
+        "qdrantApi": {
+          "id": "aWAok1h2HHdNtmht",
+          "name": "Qdrant account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const fs = require('fs');\nconst STATE_FILE = '/memory/project_rag_state.json';\nconst walkItem = $('Walk & Diff').item.json;\nconst rel = walkItem.rel;\nconst hash = walkItem.content_hash;\nconst mtime = walkItem.mtime;\nconst tagFailed = $('Parse Tags').item.json.tag_failed === true;\n\nif (tagFailed) {\n  return { json: { rel: rel, status: 'skipped_tag_failed' } };\n}\n\nlet state;\ntry {\n  const raw = JSON.parse(fs.readFileSync(STATE_FILE, 'utf8'));\n  state = raw.files !== undefined ? raw : { files: raw, dirty_dirs: [], dirty_projects: [], structure_changed: false };\n} catch (e) {\n  state = { files: {}, dirty_dirs: [], dirty_projects: [], structure_changed: false };\n}\n\nstate.files[rel] = { content_hash: hash, mtime: mtime };\nfs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 2));\n\nreturn { json: { rel: rel, status: 'indexed' } };",
+        "mode": "runOnceForEachItem"
+      },
+      "id": "rag00011-0000-4000-0000-000000000011",
+      "name": "Update Manifest",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2500, 540]
+    },
+    {
+      "parameters": {
+        "dataType": "json",
+        "jsonMode": "expressionData",
+        "jsonData": "={{ $('Walk & Diff').item.json.content }}",
+        "options": {
+          "metadata": {
+            "metadataValues": [
+              { "name": "filepath", "value": "={{ $('Walk & Diff').item.json.filepath }}" },
+              { "name": "filename", "value": "={{ $('Walk & Diff').item.json.filename }}" },
+              { "name": "filetype", "value": "={{ $('Walk & Diff').item.json.filetype }}" },
+              { "name": "project", "value": "={{ $('Walk & Diff').item.json.project }}" },
+              { "name": "mtime", "value": "={{ $('Walk & Diff').item.json.mtime }}" },
+              { "name": "content_hash", "value": "={{ $('Walk & Diff').item.json.content_hash }}" },
+              { "name": "hierarchy_id", "value": "={{ $('Walk & Diff').item.json.hierarchy_id }}" },
+              { "name": "parent_id", "value": "={{ $('Walk & Diff').item.json.parent_id }}" },
+              { "name": "level", "value": "chunk" },
+              { "name": "chunk_type", "value": "={{ $('Parse Tags').item.json.chunk_type }}" },
+              { "name": "topics", "value": "={{ $('Parse Tags').item.json.topics }}" },
+              { "name": "summary", "value": "={{ $('Parse Tags').item.json.summary }}" }
+            ]
+          }
+        }
+      },
+      "id": "rag00012-0000-4000-0000-000000000012",
+      "name": "Document Loader — Project RAG",
+      "type": "@n8n/n8n-nodes-langchain.documentDefaultDataLoader",
+      "typeVersion": 1,
+      "position": [2280, 760]
+    },
+    {
+      "parameters": {
+        "chunkSize": 1100,
+        "chunkOverlap": 180,
+        "options": {}
+      },
+      "id": "rag00013-0000-4000-0000-000000000013",
+      "name": "Text Splitter — Project RAG",
+      "type": "@n8n/n8n-nodes-langchain.textSplitterRecursiveCharacterTextSplitter",
+      "typeVersion": 1,
+      "position": [2280, 880]
+    },
+    {
+      "parameters": {
+        "model": "qwen3-embedding:4b",
+        "options": {}
+      },
+      "id": "rag00014-0000-4000-0000-000000000014",
+      "name": "Embeddings — Project RAG (Index)",
+      "type": "@n8n/n8n-nodes-langchain.embeddingsOllama",
+      "typeVersion": 1.1,
+      "position": [2280, 380],
+      "credentials": {
+        "ollamaApi": {
+          "id": "Qs8Dh8bkuU19W10U",
+          "name": "Ollama account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const fs = require('fs');\nconst http = require('http');\nconst STATE_FILE = '/memory/project_rag_state.json';\n\nfunction fireWebhook(path) {\n  return new Promise(function(resolve) {\n    const body = '{}';\n    const req = http.request(\n      { host: 'localhost', port: 5678, path: path, method: 'POST', headers: { 'Content-Type': 'application/json', 'Content-Length': 2 } },\n      function(res) { resolve(res.statusCode); }\n    );\n    req.on('error', function() { resolve(null); });\n    req.write(body);\n    req.end();\n  });\n}\n\nlet state;\ntry {\n  const raw = JSON.parse(fs.readFileSync(STATE_FILE, 'utf8'));\n  state = raw.files !== undefined ? raw : { files: raw, dirty_dirs: [], dirty_projects: [], structure_changed: false };\n} catch (e) {\n  state = { files: {}, dirty_dirs: [], dirty_projects: [], structure_changed: false };\n}\n\nconst results = {\n  dirty_dirs: (state.dirty_dirs || []).length,\n  structure_changed: state.structure_changed || false,\n  triggered_b: false,\n  triggered_d: false\n};\n\nif ((state.dirty_dirs || []).length > 0) {\n  await fireWebhook('/webhook/rag-build-directories');\n  results.triggered_b = true;\n}\n\nif (state.structure_changed) {\n  await fireWebhook('/webhook/rag-build-structure');\n  results.triggered_d = true;\n}\n\nreturn [{ json: results }];"
+      },
+      "id": "rag00018-0000-4000-0000-000000000018",
+      "name": "Post-Run Webhooks",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2720, 400]
+    }
+  ],
+  "connections": {
+    "Every 15 Minutes": {
+      "main": [[{ "node": "Walk & Diff", "type": "main", "index": 0 }]]
+    },
+    "Walk & Diff": {
+      "main": [[{ "node": "Is Deleted?", "type": "main", "index": 0 }]]
+    },
+    "Is Deleted?": {
+      "main": [
+        [{ "node": "Delete Old Chunks (Deleted)", "type": "main", "index": 0 }],
+        [{ "node": "Build Tag Prompt", "type": "main", "index": 0 }]
+      ]
+    },
+    "Delete Old Chunks (Deleted)": {
+      "main": [[{ "node": "Remove From Manifest", "type": "main", "index": 0 }]]
+    },
+    "Remove From Manifest": {
+      "main": [[{ "node": "Post-Run Webhooks", "type": "main", "index": 0 }]]
+    },
+    "Build Tag Prompt": {
+      "main": [[{ "node": "Ollama Tag Chat", "type": "main", "index": 0 }]]
+    },
+    "Ollama Tag Chat": {
+      "main": [[{ "node": "Parse Tags", "type": "main", "index": 0 }]]
+    },
+    "Parse Tags": {
+      "main": [[{ "node": "Delete Old Chunks (Pre-Insert)", "type": "main", "index": 0 }]]
+    },
+    "Delete Old Chunks (Pre-Insert)": {
+      "main": [[{ "node": "Vector Store — Project RAG", "type": "main", "index": 0 }]]
+    },
+    "Vector Store — Project RAG": {
+      "main": [[{ "node": "Upsert File Summary", "type": "main", "index": 0 }]]
+    },
+    "Upsert File Summary": {
+      "main": [[{ "node": "Update Manifest", "type": "main", "index": 0 }]]
+    },
+    "Update Manifest": {
+      "main": [[{ "node": "Post-Run Webhooks", "type": "main", "index": 0 }]]
+    },
+    "Embeddings — Project RAG (Index)": {
+      "ai_embedding": [[{ "node": "Vector Store — Project RAG", "type": "ai_embedding", "index": 0 }]]
+    },
+    "Document Loader — Project RAG": {
+      "ai_document": [[{ "node": "Vector Store — Project RAG", "type": "ai_document", "index": 0 }]]
+    },
+    "Text Splitter — Project RAG": {
+      "ai_textSplitter": [[{ "node": "Document Loader — Project RAG", "type": "ai_textSplitter", "index": 0 }]]
+    }
+  },
+  "active": true,
+  "settings": { "executionOrder": "v1" },
+  "tags": [{ "name": "rag" }, { "name": "maintenance" }],
+  "id": "3f7a1c9e-8b2d-4e6a-9c1f-7d4e9a2b5c81"
+}

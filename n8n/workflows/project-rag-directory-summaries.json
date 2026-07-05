@@ -1,0 +1,92 @@
+{
+  "name": "Project RAG \u2014 Directory Summaries",
+  "nodes": [
+    {
+      "parameters": {
+        "path": "rag-build-directories",
+        "options": {},
+        "httpMethod": "POST"
+      },
+      "id": "ragb0001-0000-4000-0000-000000000001",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        240,
+        400
+      ],
+      "webhookId": "rag-build-directories"
+    },
+    {
+      "parameters": {
+        "jsCode": "const crypto = require('crypto');\nconst http = require('http');\nconst fs = require('fs');\n\nconst STATE_FILE = '/memory/project_rag_state.json';\n\nfunction uuidv5(name) {\n  const nsHex = '6ba7b8109dad11d180b400c04fd430c8';\n  const nsBuf = Buffer.from(nsHex, 'hex');\n  const nameBuf = Buffer.from(name, 'utf8');\n  const hash = crypto.createHash('sha1').update(Buffer.concat([nsBuf, nameBuf])).digest();\n  hash[6] = (hash[6] & 0x0f) | 0x50;\n  hash[8] = (hash[8] & 0x3f) | 0x80;\n  const h = hash.slice(0, 16).toString('hex');\n  return h.slice(0,8) + '-' + h.slice(8,12) + '-' + h.slice(12,16) + '-' + h.slice(16,20) + '-' + h.slice(20,32);\n}\n\nfunction httpCall(method, host, port, urlPath, body) {\n  return new Promise(function(resolve, reject) {\n    const data = JSON.stringify(body);\n    const req = http.request(\n      { host: host, port: port, path: urlPath, method: method, headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(data) } },\n      function(res) {\n        let buf = '';\n        res.on('data', function(c) { buf += c; });\n        res.on('end', function() { try { resolve(JSON.parse(buf)); } catch(e) { resolve({}); } });\n      }\n    );\n    req.on('error', reject);\n    req.write(data);\n    req.end();\n  });\n}\n\nlet state;\ntry {\n  const raw = JSON.parse(fs.readFileSync(STATE_FILE, 'utf8'));\n  state = raw.files !== undefined ? raw : { files: raw, dirty_dirs: [], dirty_projects: [], structure_changed: false };\n} catch (e) {\n  return [{ json: { status: 'no_state', processed: 0 } }];\n}\n\nconst dirtyDirs = state.dirty_dirs || [];\nif (dirtyDirs.length === 0) {\n  return [{ json: { status: 'nothing_to_do', processed: 0 } }];\n}\n\n// Process deepest dirs first so parent dirs aggregate already-updated children\nconst sortedDirs = [...dirtyDirs].sort(function(a, b) {\n  return b.split('/').length - a.split('/').length;\n});\n\nconst processed = [];\nconst failedDirs = [];\nconst newDirtyProjects = new Set(state.dirty_projects || []);\n\nfor (const dirHierarchyId of sortedDirs) {\n  try {\n    // Query file-level summaries for this directory\n    const scrollRes = await httpCall('POST', 'qdrant', 6333, '/collections/project_rag/points/scroll', {\n      filter: {\n        must: [\n          { key: 'metadata.level', match: { value: 'file' } },\n          { key: 'metadata.parent_id', match: { value: dirHierarchyId } }\n        ]\n      },\n      limit: 100,\n      with_payload: true,\n      with_vector: false\n    });\n\n    const points = (scrollRes.result && scrollRes.result.points) || [];\n    if (points.length === 0) {\n      // No file summaries yet \u2014 keep dir dirty, try next run\n      failedDirs.push(dirHierarchyId);\n      continue;\n    }\n\n    const fileMetas = points.map(function(p) { return p.payload && p.payload.metadata ? p.payload.metadata : p.payload || {}; });\n    const summaryLines = fileMetas.map(function(m) {\n      return (m.filename || '?') + ': ' + (m.purpose || m.summary || '');\n    }).join('\\n');\n\n    const project = dirHierarchyId.split('/')[0];\n    const dirName = dirHierarchyId.split('/').pop();\n    const parentParts = dirHierarchyId.split('/');\n    const parentId = parentParts.length > 1 ? parentParts.slice(0, -1).join('/') : project;\n\n    // Synthesize directory summary\n    const chatRes = await httpCall('POST', 'host.docker.internal', 11434, '/api/chat', {\n      model: 'qwen2.5-coder:14b',\n      messages: [\n        { role: 'system', content: 'You summarize software project directories for a semantic search index. Output STRICT JSON only, no markdown fences.' },\n        { role: 'user', content: 'Project: ' + project + '\\nDirectory: ' + dirHierarchyId + '\\nFiles and their purposes:\\n' + summaryLines + '\\n\\nRespond with STRICT JSON: {\"summary\": \"<one sentence>\", \"purpose\": \"<short phrase>\", \"responsibilities\": [\"<verb phrase>\"], \"key_files\": [\"<filename>\"], \"topics\": [\"<keyword>\"]}' }\n      ],\n      stream: false,\n      options: { temperature: 0.1, num_predict: 300 }\n    });\n\n    let parsed = {};\n    try {\n      const rawText = (chatRes.message && chatRes.message.content) || '';\n      parsed = JSON.parse(rawText.replace(/```json|```/g, '').trim());\n    } catch (e) {\n      parsed = {\n        summary: 'Directory ' + dirName + ' containing ' + fileMetas.length + ' files',\n        purpose: dirName,\n        responsibilities: [],\n        key_files: fileMetas.slice(0, 3).map(function(m) { return m.filename || ''; }),\n        topics: []\n      };\n    }\n\n    // Embed\n    const embedText = [\n      'Directory: ' + dirHierarchyId,\n      'Purpose: ' + (parsed.purpose || parsed.summary || ''),\n      parsed.responsibilities && parsed.responsibilities.length ? 'Responsibilities: ' + parsed.responsibilities.join(', ') : '',\n      parsed.topics && parsed.topics.length ? 'Topics: ' + parsed.topics.join(', ') : ''\n    ].filter(Boolean).join('\\n');\n\n    const embedRes = await httpCall('POST', 'host.docker.internal', 11434, '/api/embed', {\n      model: 'qwen3-embedding:4b', input: embedText\n    });\n    const vector = (embedRes.embeddings || [[]])[0];\n\n    if (!vector || !vector.length) {\n      const line = new Date().toISOString() + '\\tdir_embed_empty\\t' + dirHierarchyId + '\\n';\n      try { fs.appendFileSync('/memory/project_rag_failures.log', line); } catch (err) {}\n      failedDirs.push(dirHierarchyId);\n      continue;\n    }\n\n    const contentText = [\n      'Purpose: ' + (parsed.purpose || parsed.summary || ''),\n      parsed.responsibilities && parsed.responsibilities.length ? 'Responsibilities: ' + parsed.responsibilities.join(', ') : '',\n      parsed.key_files && parsed.key_files.length ? 'Key files: ' + parsed.key_files.join(', ') : '',\n      parsed.topics && parsed.topics.length ? 'Topics: ' + parsed.topics.join(', ') : ''\n    ].filter(Boolean).join('\\n');\n\n    // Upsert directory summary point\n    const pointId = uuidv5('dir:' + dirHierarchyId);\n    await httpCall('PUT', 'qdrant', 6333, '/collections/project_rag/points?wait=false', {\n      points: [{\n        id: pointId,\n        vector: vector,\n        payload: {\n          content: contentText,\n          metadata: {\n            hierarchy_id: dirHierarchyId,\n            level: 'directory',\n            parent_id: parentId,\n            project: project,\n            summary: parsed.summary || '',\n            purpose: parsed.purpose || '',\n            responsibilities: parsed.responsibilities || [],\n            key_files: parsed.key_files || [],\n            topics: parsed.topics || [],\n            children: fileMetas.map(function(m) { return m.hierarchy_id; }).filter(Boolean),\n            updated_at: new Date().toISOString()\n          }\n        }\n      }]\n    });\n\n    newDirtyProjects.add(project);\n    processed.push(dirHierarchyId);\n  } catch (e) {\n    const line = new Date().toISOString() + '\\tdir_synthesis_error\\t' + dirHierarchyId + '\\t' + String(e) + '\\n';\n    try { fs.appendFileSync('/memory/project_rag_failures.log', line); } catch (err) {}\n    failedDirs.push(dirHierarchyId);\n  }\n}\n\n// Update state: clear processed dirs, keep failed, accumulate dirty projects\nstate.dirty_dirs = failedDirs;\nstate.dirty_projects = Array.from(newDirtyProjects);\nfs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 2));\n\nreturn [{ json: { status: 'done', processed: processed.length, failed: failedDirs.length, dirty_projects: Array.from(newDirtyProjects) } }];"
+      },
+      "id": "ragb0002-0000-4000-0000-000000000002",
+      "name": "Synthesize Directory Summaries",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        460,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:5678/webhook/rag-build-projects",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={}",
+        "options": {
+          "timeout": 5000
+        }
+      },
+      "id": "ragb0003-0000-4000-0000-000000000003",
+      "name": "Trigger Project Synthesis",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        680,
+        400
+      ],
+      "onError": "continueRegularOutput"
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Synthesize Directory Summaries",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Synthesize Directory Summaries": {
+      "main": [
+        [
+          {
+            "node": "Trigger Project Synthesis",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": [
+    {
+      "name": "rag"
+    },
+    {
+      "name": "maintenance"
+    }
+  ],
+  "id": "ragb1111-0000-4000-0000-000000000001"
+}

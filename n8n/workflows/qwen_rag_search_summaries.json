@@ -1,0 +1,105 @@
+{
+  "name": "qwen_rag_search_summaries",
+  "nodes": [
+    {
+      "parameters": {
+        "workflowInputs": {
+          "values": [
+            { "name": "query", "type": "string" },
+            { "name": "level", "type": "string" },
+            { "name": "project", "type": "string" }
+          ]
+        }
+      },
+      "id": "rags0001-0000-4000-0000-000000000001",
+      "name": "Execute Workflow Trigger",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const input = $input.first().json;\nreturn [{ json: { model: 'qwen3-embedding:4b', input: input.query } }];"
+      },
+      "id": "rags0002-0000-4000-0000-000000000002",
+      "name": "Build Embed Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:11434/api/embed",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json }}",
+        "options": { "timeout": 20000 }
+      },
+      "id": "rags0003-0000-4000-0000-000000000003",
+      "name": "Embed Query",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const embedRes = $input.first().json;\nconst vector = (embedRes.embeddings || [[]])[0];\nconst trigger = $('Execute Workflow Trigger').first().json;\nconst level = (trigger.level || '').trim();\nconst project = (trigger.project || '').trim();\n\nconst VALID_LEVELS = ['file', 'directory', 'project'];\n\nconst mustClauses = [];\n\nif (level && VALID_LEVELS.includes(level)) {\n  mustClauses.push({ key: 'metadata.level', match: { value: level } });\n} else {\n  // Default: search all summary levels (not raw chunks)\n  mustClauses.push({ key: 'metadata.level', match: { any: ['file', 'directory', 'project'] } });\n}\n\nif (project) {\n  mustClauses.push({ key: 'metadata.project', match: { value: project } });\n}\n\nconst body = {\n  vector: vector,\n  limit: 6,\n  with_payload: true,\n  score_threshold: 0.4,\n  filter: { must: mustClauses }\n};\n\nreturn [{ json: body }];"
+      },
+      "id": "rags0004-0000-4000-0000-000000000004",
+      "name": "Build Search",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [900, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://qdrant:6333/collections/project_rag/points/search",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json }}",
+        "options": {
+          "timeout": 10000,
+          "response": { "response": { "responseFormat": "json" } }
+        }
+      },
+      "id": "rags0005-0000-4000-0000-000000000005",
+      "name": "Search Qdrant",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1120, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const results = $input.first().json.result || [];\nconst trigger = $('Execute Workflow Trigger').first().json;\n\nif (results.length === 0) {\n  return [{ json: { output: 'No summary results found for: \"' + trigger.query + '\"\\nTip: try search_project_rag for implementation-level details.' } }];\n}\n\nconst formatted = results.map(function(r, i) {\n  const m = r.payload && r.payload.metadata ? r.payload.metadata : r.payload || {};\n  const content = r.payload && r.payload.content ? r.payload.content : '';\n  const level = m.level || 'unknown';\n  const id = m.hierarchy_id || m.project || '?';\n  const score = (r.score * 100).toFixed(0);\n  return '[' + (i + 1) + '] [' + level.toUpperCase() + '] ' + id + ' (score: ' + score + '%)\\n' + content;\n}).join('\\n\\n');\n\nreturn [{ json: { output: 'Project RAG summaries: \"' + trigger.query + '\" \\u2014 ' + results.length + ' result(s)\\n\\n' + formatted } }];"
+      },
+      "id": "rags0006-0000-4000-0000-000000000006",
+      "name": "Format Results",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1340, 300]
+    }
+  ],
+  "connections": {
+    "Execute Workflow Trigger": {
+      "main": [[{ "node": "Build Embed Request", "type": "main", "index": 0 }]]
+    },
+    "Build Embed Request": {
+      "main": [[{ "node": "Embed Query", "type": "main", "index": 0 }]]
+    },
+    "Embed Query": {
+      "main": [[{ "node": "Build Search", "type": "main", "index": 0 }]]
+    },
+    "Build Search": {
+      "main": [[{ "node": "Search Qdrant", "type": "main", "index": 0 }]]
+    },
+    "Search Qdrant": {
+      "main": [[{ "node": "Format Results", "type": "main", "index": 0 }]]
+    }
+  },
+  "active": true,
+  "settings": { "executionOrder": "v1" },
+  "tags": [{ "name": "rag" }],
+  "id": "rags4444-0000-4000-0000-000000000001"
+}

@@ -1,0 +1,70 @@
+{
+  "name": "qwen_changelog",
+  "nodes": [
+    {
+      "parameters": {
+        "workflowInputs": {
+          "values": [
+            { "name": "input", "type": "string" }
+          ]
+        }
+      },
+      "id": "00000006-0001-4000-0000-000000000006",
+      "name": "Execute Workflow Trigger",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const sys = 'Convert this git log to a changelog section. Group entries under: Added, Changed, Fixed, Removed. Write in past tense. Skip merge commits and chores. Max 12 entries total. Markdown format.'; return [{ json: { model: 'qwen2.5:14b', messages: [{ role: 'system', content: sys }, { role: 'user', content: $input.first().json.input }], stream: false, options: { temperature: 0.1 } } }];"
+      },
+      "id": "00000006-0002-4000-0000-000000000006",
+      "name": "Build Body",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:11434/api/chat",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json }}",
+        "options": {}
+      },
+      "id": "00000006-0003-4000-0000-000000000006",
+      "name": "Ollama Chat",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: { output: $input.first().json.message.content } }];"
+      },
+      "id": "00000006-0004-4000-0000-000000000006",
+      "name": "Extract Output",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [900, 300]
+    }
+  ],
+  "connections": {
+    "Execute Workflow Trigger": {
+      "main": [[{ "node": "Build Body", "type": "main", "index": 0 }]]
+    },
+    "Build Body": {
+      "main": [[{ "node": "Ollama Chat", "type": "main", "index": 0 }]]
+    },
+    "Ollama Chat": {
+      "main": [[{ "node": "Extract Output", "type": "main", "index": 0 }]]
+    }
+  },
+  "active": false,
+  "settings": { "executionOrder": "v1" },
+  "meta": { "templateCredsSetupCompleted": true, "instanceId": "REPLACE_WITH_YOUR_INSTANCE_ID" },
+  "tags": [{ "name": "qwen" }, { "name": "local-model" }],
+  "id": "00000006-0000-4000-0000-000000000006"
+}
