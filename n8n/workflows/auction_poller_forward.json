@@ -25,7 +25,7 @@
   },
   {
    "id": "a1000002-0000-4000-0000-000000000002",
-   "name": "Fetch New Auctions",
+   "name": "Fetch New Items",
    "type": "n8n-nodes-base.httpRequest",
    "typeVersion": 4.2,
    "position": [
@@ -43,8 +43,8 @@
        "value": "new"
       },
       {
-       "name": "type",
-       "value": "auction"
+       "name": "limit",
+       "value": "200"
       }
      ]
     },
@@ -68,8 +68,8 @@
    }
   },
   {
-   "id": "a1000004-0000-4000-0000-000000000004",
-   "name": "Send Auction Alert",
+   "id": "a1000008-0000-4000-0000-000000000008",
+   "name": "Translate Title",
    "type": "n8n-nodes-base.httpRequest",
    "typeVersion": 4.2,
    "position": [
@@ -79,15 +79,79 @@
    "onError": "continueRegularOutput",
    "parameters": {
     "method": "POST",
-    "url": "=https://api.telegram.org/bot{{ $env.TELEGRAM_BOT_TOKEN }}/sendMessage",
+    "url": "http://host.docker.internal:11434/api/chat",
     "sendBody": true,
     "specifyBody": "json",
-    "jsonBody": "={{ (function() {\n  var esc = s => String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');\n  var i = $json;\n  var yen = function(n) { return '¥' + Number(n).toLocaleString('en-US'); };\n  var end = new Date(i.end_time * 1000).toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' });\n  var lines = [\n    '🔨 <b>' + esc(i.title) + '</b>',\n    '',\n    'Price: ' + yen(i.price) + (i.buynow_price > 0 ? '  |  Buy now: ' + yen(i.buynow_price) : ''),\n    'Ends: ' + esc(end) + ' JST',\n    'Watch: ' + esc(i.watch_query),\n    '',\n    '<a href=\"' + esc(i.url) + '\">' + esc(i.url) + '</a>'\n  ];\n  return JSON.stringify({ chat_id: $env.TELEGRAM_CHAT_ID, text: lines.join('\\n'), parse_mode: 'HTML' });\n})() }}",
+    "jsonBody": "={{ JSON.stringify({\n  model: 'qwen3-14b-nothink:latest',\n  stream: false,\n  think: false,\n  options: { num_ctx: 2048, temperature: 0 },\n  messages: [\n    { role: 'system', content: \"You translate Japanese Yahoo Auctions listing titles into English for a buyer who cannot read Japanese. The listings are mostly parts, accessories and literature for Suzuki kei cars (Cappuccino EA11R, Cara and AZ-1 PG6SS/PG6SA) and similar Japanese cars. Katakana words that are car model names, for example キャラ (Cara), カプチーノ (Cappuccino), アルト (Alto), ジムニー (Jimny), are model names: transliterate them, never translate them as ordinary words. Keep part numbers, model codes and chassis codes (EA11R, PG6SS, F6A, AZ-1, 35501-69DA0 and so on) exactly as written. Translate condition and fitment words literally (ジャンク = junk / for parts, 未使用 = unused, 純正 = genuine OEM). Do not add any information that is not in the title. Reply with the English translation only, on one line.\" },\n    { role: 'user', content: String($json.title || '').trim() }\n  ]\n}) }}",
     "options": {
-     "batching": {
-      "batch": {
-       "batchSize": 1,
-       "batchInterval": 1100
+     "timeout": 180000
+    }
+   }
+  },
+  {
+   "id": "a1000009-0000-4000-0000-000000000009",
+   "name": "Build Message",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    1120,
+    300
+   ],
+   "parameters": {
+    "mode": "runOnceForEachItem",
+    "jsCode": "var i = $('Split Out').item.json;\nvar esc = function(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); };\nvar yen = function(n) { return '¥' + Number(n).toLocaleString('en-US'); };\nvar jp = String(i.title || '').trim();\nvar img = (i.image_stored === false && i.image_source) ? i.image_source : (i.image || '');\nvar tr = '';\nif ($json && $json.message && typeof $json.message.content === 'string') {\n  tr = $json.message.content.replace(/<think>[\\s\\S]*?<\\/think>/g, '').trim().split('\\n')[0].trim().slice(0, 300);\n}\nvar end = new Date(i.end_time * 1000).toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' });\nvar isBin = i.type === 'buy_it_now';\nvar head = (tr && tr !== jp) ? '<b>' + esc(tr) + '</b>\\n' + esc(jp) : '<b>' + esc(jp) + '</b>';\nvar lines = [\n  (isBin ? '🛒 Buy it now' : '🔨 Auction'),\n  head,\n  '',\n  'Price: ' + yen(i.price) + ((i.buynow_price > 0 && !isBin) ? '  |  Buy now: ' + yen(i.buynow_price) : ''),\n  'Ends: ' + esc(end) + ' JST',\n  'Watch: ' + esc(i.watch_query),\n  '',\n  '<a href=\"' + esc(i.url) + '\">' + esc(i.url) + '</a>'\n];\nreturn { json: { auction_id: i.auction_id, image: img, caption: lines.join('\\n'), translated: !!tr } };\n"
+   }
+  },
+  {
+   "id": "a1000004-0000-4000-0000-000000000004",
+   "name": "Send Photo",
+   "type": "n8n-nodes-base.telegram",
+   "typeVersion": 1.2,
+   "position": [
+    1560,
+    300
+   ],
+   "onError": "continueRegularOutput",
+   "retryOnFail": true,
+   "maxTries": 2,
+   "waitBetweenTries": 2000,
+   "credentials": {
+    "telegramApi": {
+     "id": "Z8q2xwxyJY7RguGl",
+     "name": "Telegram account"
+    }
+   },
+   "parameters": {
+    "resource": "message",
+    "operation": "sendPhoto",
+    "chatId": "8990108506",
+    "binaryData": true,
+    "binaryPropertyName": "data",
+    "additionalFields": {
+     "caption": "={{ $('Build Message').item.json.caption }}",
+     "parse_mode": "HTML"
+    }
+   }
+  },
+  {
+   "id": "a100000c-0000-4000-0000-00000000000c",
+   "name": "Download Image",
+   "type": "n8n-nodes-base.httpRequest",
+   "typeVersion": 4.2,
+   "position": [
+    1340,
+    300
+   ],
+   "onError": "continueRegularOutput",
+   "parameters": {
+    "method": "GET",
+    "url": "={{ $json.image }}",
+    "options": {
+     "timeout": 20000,
+     "response": {
+      "response": {
+       "responseFormat": "file",
+       "outputPropertyName": "data"
       }
      }
     }
@@ -95,11 +159,11 @@
   },
   {
    "id": "a1000005-0000-4000-0000-000000000005",
-   "name": "Sent OK?",
+   "name": "Photo OK?",
    "type": "n8n-nodes-base.if",
    "typeVersion": 2,
    "position": [
-    1120,
+    1780,
     300
    ],
    "parameters": {
@@ -112,7 +176,68 @@
      "conditions": [
       {
        "id": "c1",
-       "leftValue": "={{ $json.ok }}",
+       "leftValue": "={{ !$json.error && $json.ok === true }}",
+       "rightValue": "",
+       "operator": {
+        "type": "boolean",
+        "operation": "true",
+        "singleValue": true
+       }
+      }
+     ],
+     "combinator": "and"
+    },
+    "options": {}
+   }
+  },
+  {
+   "id": "a100000a-0000-4000-0000-00000000000a",
+   "name": "Send Text Fallback",
+   "type": "n8n-nodes-base.telegram",
+   "typeVersion": 1.2,
+   "position": [
+    1780,
+    420
+   ],
+   "onError": "continueRegularOutput",
+   "retryOnFail": true,
+   "maxTries": 3,
+   "waitBetweenTries": 2000,
+   "credentials": {
+    "telegramApi": {
+     "id": "Z8q2xwxyJY7RguGl",
+     "name": "Telegram account"
+    }
+   },
+   "parameters": {
+    "chatId": "8990108506",
+    "text": "={{ $('Build Message').item.json.caption }}",
+    "additionalFields": {
+     "parse_mode": "HTML",
+     "appendAttribution": false
+    }
+   }
+  },
+  {
+   "id": "a100000b-0000-4000-0000-00000000000b",
+   "name": "Text OK?",
+   "type": "n8n-nodes-base.if",
+   "typeVersion": 2,
+   "position": [
+    2000,
+    420
+   ],
+   "parameters": {
+    "conditions": {
+     "options": {
+      "caseSensitive": true,
+      "leftValue": "",
+      "typeValidation": "loose"
+     },
+     "conditions": [
+      {
+       "id": "c2",
+       "leftValue": "={{ !$json.error && $json.ok === true }}",
        "rightValue": "",
        "operator": {
         "type": "boolean",
@@ -132,18 +257,31 @@
    "type": "n8n-nodes-base.httpRequest",
    "typeVersion": 4.2,
    "position": [
-    1340,
-    220
+    2220,
+    240
    ],
    "parameters": {
     "method": "POST",
     "url": "http://host.docker.internal:8765/api/items/ack",
     "sendBody": true,
     "specifyBody": "json",
-    "jsonBody": "={{ JSON.stringify({ ids: [ $('Split Out').item.json.auction_id ] }) }}",
+    "jsonBody": "={{ JSON.stringify({ ids: [ $('Build Message').item.json.auction_id ] }) }}",
     "options": {
      "timeout": 30000
     }
+   }
+  },
+  {
+   "id": "a1000007-0000-4000-0000-000000000007",
+   "name": "Delivery Failed",
+   "type": "n8n-nodes-base.stopAndError",
+   "typeVersion": 1,
+   "position": [
+    2220,
+    560
+   ],
+   "parameters": {
+    "errorMessage": "={{ 'Telegram delivery failed for auction ' + $('Build Message').item.json.auction_id + ' (photo and text fallback)' }}"
    }
   }
  ],
@@ -152,14 +290,14 @@
    "main": [
     [
      {
-      "node": "Fetch New Auctions",
+      "node": "Fetch New Items",
       "type": "main",
       "index": 0
      }
     ]
    ]
   },
-  "Fetch New Auctions": {
+  "Fetch New Items": {
    "main": [
     [
      {
@@ -174,25 +312,58 @@
    "main": [
     [
      {
-      "node": "Send Auction Alert",
+      "node": "Translate Title",
       "type": "main",
       "index": 0
      }
     ]
    ]
   },
-  "Send Auction Alert": {
+  "Translate Title": {
    "main": [
     [
      {
-      "node": "Sent OK?",
+      "node": "Build Message",
       "type": "main",
       "index": 0
      }
     ]
    ]
   },
-  "Sent OK?": {
+  "Build Message": {
+   "main": [
+    [
+     {
+      "node": "Download Image",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Download Image": {
+   "main": [
+    [
+     {
+      "node": "Send Photo",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Send Photo": {
+   "main": [
+    [
+     {
+      "node": "Photo OK?",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Photo OK?": {
    "main": [
     [
      {
@@ -201,7 +372,42 @@
       "index": 0
      }
     ],
-    []
+    [
+     {
+      "node": "Send Text Fallback",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Send Text Fallback": {
+   "main": [
+    [
+     {
+      "node": "Text OK?",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Text OK?": {
+   "main": [
+    [
+     {
+      "node": "Ack Item",
+      "type": "main",
+      "index": 0
+     }
+    ],
+    [
+     {
+      "node": "Delivery Failed",
+      "type": "main",
+      "index": 0
+     }
+    ]
    ]
   }
  },
