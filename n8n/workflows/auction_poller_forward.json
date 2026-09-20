@@ -1,0 +1,215 @@
+{
+ "id": "auct0001-0000-4000-0000-000000000001",
+ "name": "Auction Poller Forward",
+ "active": true,
+ "nodes": [
+  {
+   "id": "a1000001-0000-4000-0000-000000000001",
+   "name": "Schedule Trigger",
+   "type": "n8n-nodes-base.scheduleTrigger",
+   "typeVersion": 1.2,
+   "position": [
+    240,
+    300
+   ],
+   "parameters": {
+    "rule": {
+     "interval": [
+      {
+       "field": "minutes",
+       "minutesInterval": 10
+      }
+     ]
+    }
+   }
+  },
+  {
+   "id": "a1000002-0000-4000-0000-000000000002",
+   "name": "Fetch New Auctions",
+   "type": "n8n-nodes-base.httpRequest",
+   "typeVersion": 4.2,
+   "position": [
+    460,
+    300
+   ],
+   "parameters": {
+    "method": "GET",
+    "url": "http://host.docker.internal:8765/api/items",
+    "sendQuery": true,
+    "queryParameters": {
+     "parameters": [
+      {
+       "name": "status",
+       "value": "new"
+      },
+      {
+       "name": "type",
+       "value": "auction"
+      }
+     ]
+    },
+    "options": {
+     "timeout": 30000
+    }
+   }
+  },
+  {
+   "id": "a1000003-0000-4000-0000-000000000003",
+   "name": "Split Out",
+   "type": "n8n-nodes-base.splitOut",
+   "typeVersion": 1,
+   "position": [
+    680,
+    300
+   ],
+   "parameters": {
+    "fieldToSplitOut": "items",
+    "options": {}
+   }
+  },
+  {
+   "id": "a1000004-0000-4000-0000-000000000004",
+   "name": "Send Auction Alert",
+   "type": "n8n-nodes-base.httpRequest",
+   "typeVersion": 4.2,
+   "position": [
+    900,
+    300
+   ],
+   "onError": "continueRegularOutput",
+   "parameters": {
+    "method": "POST",
+    "url": "=https://api.telegram.org/bot{{ $env.TELEGRAM_BOT_TOKEN }}/sendMessage",
+    "sendBody": true,
+    "specifyBody": "json",
+    "jsonBody": "={{ (function() {\n  var esc = s => String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');\n  var i = $json;\n  var yen = function(n) { return '¥' + Number(n).toLocaleString('en-US'); };\n  var end = new Date(i.end_time * 1000).toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' });\n  var lines = [\n    '🔨 <b>' + esc(i.title) + '</b>',\n    '',\n    'Price: ' + yen(i.price) + (i.buynow_price > 0 ? '  |  Buy now: ' + yen(i.buynow_price) : ''),\n    'Ends: ' + esc(end) + ' JST',\n    'Watch: ' + esc(i.watch_query),\n    '',\n    '<a href=\"' + esc(i.url) + '\">' + esc(i.url) + '</a>'\n  ];\n  return JSON.stringify({ chat_id: $env.TELEGRAM_CHAT_ID, text: lines.join('\\n'), parse_mode: 'HTML' });\n})() }}",
+    "options": {
+     "batching": {
+      "batch": {
+       "batchSize": 1,
+       "batchInterval": 1100
+      }
+     }
+    }
+   }
+  },
+  {
+   "id": "a1000005-0000-4000-0000-000000000005",
+   "name": "Sent OK?",
+   "type": "n8n-nodes-base.if",
+   "typeVersion": 2,
+   "position": [
+    1120,
+    300
+   ],
+   "parameters": {
+    "conditions": {
+     "options": {
+      "caseSensitive": true,
+      "leftValue": "",
+      "typeValidation": "loose"
+     },
+     "conditions": [
+      {
+       "id": "c1",
+       "leftValue": "={{ $json.ok }}",
+       "rightValue": "",
+       "operator": {
+        "type": "boolean",
+        "operation": "true",
+        "singleValue": true
+       }
+      }
+     ],
+     "combinator": "and"
+    },
+    "options": {}
+   }
+  },
+  {
+   "id": "a1000006-0000-4000-0000-000000000006",
+   "name": "Ack Item",
+   "type": "n8n-nodes-base.httpRequest",
+   "typeVersion": 4.2,
+   "position": [
+    1340,
+    220
+   ],
+   "parameters": {
+    "method": "POST",
+    "url": "http://host.docker.internal:8765/api/items/ack",
+    "sendBody": true,
+    "specifyBody": "json",
+    "jsonBody": "={{ JSON.stringify({ ids: [ $('Split Out').item.json.auction_id ] }) }}",
+    "options": {
+     "timeout": 30000
+    }
+   }
+  }
+ ],
+ "connections": {
+  "Schedule Trigger": {
+   "main": [
+    [
+     {
+      "node": "Fetch New Auctions",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Fetch New Auctions": {
+   "main": [
+    [
+     {
+      "node": "Split Out",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Split Out": {
+   "main": [
+    [
+     {
+      "node": "Send Auction Alert",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Send Auction Alert": {
+   "main": [
+    [
+     {
+      "node": "Sent OK?",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Sent OK?": {
+   "main": [
+    [
+     {
+      "node": "Ack Item",
+      "type": "main",
+      "index": 0
+     }
+    ],
+    []
+   ]
+  }
+ },
+ "settings": {
+  "executionOrder": "v1"
+ },
+ "meta": {
+  "templateCredsSetupCompleted": true
+ },
+ "tags": []
+}
